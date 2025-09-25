@@ -171,7 +171,5 @@ cython_debug/
 .pypirc
 
 # Paths
-
-data/
 .vscode/
 .idea/
