@@ -1,0 +1,153 @@
+# src/modules/sbs_data_fetcher.py
+
+import os
+import sys
+import requests
+import pandas as pd
+from io import BytesIO
+from pathlib import Path
+from datetime import datetime
+from itertools import product
+from typing import Tuple, List, Dict, Set
+# os.chdir(
+#     os.path.dirname(
+#         os.path.dirname(
+#             os.path.dirname(
+#                 os.path.abspath(__file__))
+#                 )
+#         )
+#     )
+
+if __name__ == "__main__":
+    project_root = Path(__file__).parent.parent.parent
+    sys.path.insert(0, str(project_root))
+
+import src.utils as utils
+
+def _expected_dates(start_year: int = 2002, period: str = 'M') -> Set[str]:
+    # --- Construye la lista de fechas esperadas en formato 'AAAAMM' ---
+    if period not in ['M', 'Q']:
+        raise ValueError("El parámetro 'period' debe ser 'M' (mensual) o 'Q' (trimestral).")
+    if start_year > datetime.now().year:
+        raise ValueError(f"El 'start_year' no debe ser mayor al año actual.")
+    current_year = datetime.now().year
+    range_years = list(range(start_year, current_year + 1))
+    range_months = list(range(1, 13)) if period == 'M' else [3, 6, 9, 12]
+    expected_dates = set(
+        [str(year)+str(month).zfill(2) for year in range_years for month in range_months]
+        )
+    return expected_dates
+
+def _existing_dates(path_file: str, date_col: str = 'DATE') -> Set[str]:
+    # --- Extrae las fechas existentes en el DataFrame en formato 'AAAAMM' ---
+    df = pd.read_csv(path_file)
+    existing_dates = set(df[date_col].astype(str))
+    return existing_dates
+
+def _missing_dates(path_file: str, date_col: str = 'DATE', period: str = 'M', 
+                   start_year: int = 2002) -> List[str]:
+    # --- Identifica las fechas faltantes en el dataset ---
+    if not os.path.exists(path_file):
+        missing_dates = sorted(list(_expected_dates(start_year, period)))
+    else:
+        expected_dates = _expected_dates(start_year, period)
+        existing_dates = _existing_dates(path_file, date_col)
+        if not existing_dates.issubset(expected_dates):
+            raise ValueError("El DataFrame contiene fechas fuera del rango esperado.")
+        missing_dates = sorted(list(expected_dates - existing_dates))
+    return missing_dates
+    
+def _list_tuples_dates(path_file: str, date_col: str = 'DATE', period: str = 'M', 
+                   start_year: int = 2002) -> List[Tuple[str, Tuple[str, str, str]]]:
+    # --- Construye la lista de combinaciones de año y mes para formar las url ---
+    months_map = [
+        'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
+        'Julio', 'Agosto', 'Setiembre', 'Octubre', 'Noviembre', 'Diciembre'
+    ]
+    months_short_map = [
+        'en', 'fe', 'ma', 'ab', 'my', 'jn',
+        'jl', 'ag', 'se', 'oc', 'no', 'di'
+    ]
+    missing_dates = _missing_dates(path_file, date_col, period, start_year)
+    years = sorted(list(set([date[:4] for date in missing_dates])))
+    months = sorted(list(set([int(date[4:]) for date in missing_dates])))
+    months_list_tuples = [
+        (str(month).zfill(2),months_map[month-1], months_short_map[month-1]) 
+        for month in months
+        ]
+    list_tuples_dates = list(product(years, months_list_tuples))
+    return list_tuples_dates
+
+def _build_dic_dataset_urls(path_file: str, date_col: str = 'DATE', start_year: int = 2002) -> dict:
+    # --- Construye las URLs de los datasets faltantes ---
+    # Plantillas para nombres y URLs
+    urls_templates = {
+        'Banca_Multiple_EEFF': 'B-2201',
+        'Banca_Multiple_Ratios': 'B-2401',
+        'Empresas_Financieras_EEFF': 'B-3101',
+        'Empresas_Financieras_Ratios': 'B-3301',
+        'Cajas_Municipales_EEFF': 'C-1101',
+        'Cajas_Municipales_Ratios': 'C-1301',
+        'Cajas_Rurales_EEFF': 'C-2101',
+        'Cajas_Rurales_Ratios': 'C-2301',
+        'Empresas_Crediticias_EEFF': 'C-4103',
+        'Empresas_Crediticias_Ratios': 'C-4301',
+        'Cooperativas_Nivel3_EEFF': 'SC-0002',
+        'Cooperativas_Nivel2b_EEFF': 'SC-0003',
+        'Cooperativas_Nivel2a_EEFF': 'SC-0004',
+        'Cooperativas_Nivel1_EEFF': 'SC-0005'
+    }
+    for key, value in urls_templates.items():
+        period = 'Q' if key in ['Cooperativas_Nivel2a_EEFF','Cooperativas_Nivel1_EEFF'] else 'M'
+        list_tuples_dates = _list_tuples_dates(path_file, date_col, period, start_year)
+        dic_datasets_urls = {}
+        for (year, (month, month_long, month_short)), (name_prefix, code) in product(list_tuples_dates, [(key, value)]):
+            key = f'{name_prefix}_{year}{month}'
+            url = f'https://intranet2.sbs.gob.pe/estadistica/financiera/{year}/{month_long}/{code}-{month_short}{year}.XLS'
+            dic_datasets_urls[key] = url
+        return dic_datasets_urls
+
+def download_dataset(path_file: str, date_col: str = 'DATE', start_year: int = 2002) -> Tuple[bool, Dict[str, BytesIO]]:
+    """
+    Descarga datasets y los mantiene en memoria (BytesIO) sin guardarlos localmente.
+    
+    Returns:
+        Tuple con:
+        - bool: Si hubo descargas
+        - Dict[str, BytesIO]: Diccionario con nombre_archivo -> contenido en memoria
+    """
+    logger = utils.get_logger('SBS')
+    logger.info(">>> Realizando el proceso de descarga de datasets en memoria...")
+    build_dic_dataset_urls = _build_dic_dataset_urls(path_file, date_col, start_year)
+    # Diccionario para almacenar archivos en memoria
+    files_in_memory = {}
+    for file_name, url in build_dic_dataset_urls.items():
+        try:
+            response = requests.get(url)
+            if response.status_code == 200:
+                # Crear objeto BytesIO en memoria
+                file_memory = BytesIO(response.content)
+                files_in_memory[file_name] = file_memory
+                logger.info(f"Archivo cargado en memoria: {file_name}.xls desde {url}")
+            else:
+                logger.warning(f"Archivo {file_name} no encontrado en la URL: {url} (Status code: {response.status_code})")
+        except requests.RequestException as e:
+            logger.error(f"Error al descargar el archivo desde {url}: {e}")
+    
+    was_downloaded = bool(files_in_memory)
+    if was_downloaded:
+        logger.info(f"Descarga finalizada. Se cargaron {len(files_in_memory)} archivos en memoria.")
+    else:
+        logger.info("No se encontraron archivos para descargar.")
+    
+    logger.info(f"<<< Proceso de descarga finalizado. Hubo descargas: {was_downloaded}.")
+    return was_downloaded, files_in_memory
+
+if __name__ == "__main__":
+    path_file = os.path.normpath('data/processed/sbs_eeff_analyzed.csv')
+    was_downloaded, files_in_memory = download_dataset(path_file)
+    if was_downloaded:
+        print(f"Se cargaron {len(files_in_memory)} archivos en memoria.")
+    else:
+        print("No se encontraron archivos para descargar.")
+
