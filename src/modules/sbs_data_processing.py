@@ -1,13 +1,17 @@
 # src/modules/data_processing.py
 
 import os
-import warnings
+import sys
 import pandas as pd
-from tqdm import tqdm
-import src.utils as utils
-from typing import List, Optional, Tuple
+from pathlib import Path
 
-warnings.filterwarnings('ignore')
+if __name__ == "__main__":
+    project_root = Path(__file__).parent.parent.parent
+    sys.path.insert(0, str(project_root))
+
+import src.utils as utils
+from src.modules.sbs_data_fetcher import download_dataset
+
 
 # --- Variables de Configuración ---
 MONTHS_MAP = [
@@ -22,41 +26,122 @@ NET_RESULT_TERMS = [
     "UTILIDAD (PÉRDIDA) NETA"
 ]
 
-
-def _localize(df: pd.DataFrame, terms, exact=False, occurrence="first") -> Optional[Tuple[int, int]]:
-    """Busca coincidencias de uno o varios términos dentro de un DataFrame."""
+def _clean_str_or_liststr(terms: str | list[str]) -> list[str]:
+    # --- Limpia y normaliza una cadena o lista de cadenas para búsqueda. ---
     if isinstance(terms, str):
         terms = [terms]
-    terms = [str(t).strip().lower() for t in terms]
-    df_str = df.astype(str).where(df.notna(), "").applymap(lambda x: x.strip().lower())
+    # Normalizamos términos
+    terms = [str(term).strip().lower() for term in terms]
+    return terms
 
+def _clean_df(df: pd.DataFrame) -> pd.DataFrame:
+    # --- Limpia y normaliza un DataFrame para búsqueda. ---
+    df_str = df.astype(str).where(df.notna(), "")
+    df_str = df_str.map(lambda x: x.strip().lower())
+    return df_str
+
+def _build_mask_to_search(df: pd.DataFrame, terms: list[str], exact: bool) -> pd.DataFrame:
+    # --- Construye una máscara booleana para buscar términos en un DataFrame. ---
     if exact:
-        mask = df_str.isin(terms)
+        mask = df.isin(terms)
     else:
-        mask = df_str.apply(lambda col: col.str.contains('|'.join(map(str, terms)), na=False))
+        mask = df.apply(
+            lambda col: col.str.contains('|'.join(map(str, terms)), na=False)
+            )
+    return mask
 
-    matches = mask.stack()[lambda s: s]
+def _localize_terms(df: pd.DataFrame, terms_clean: list[str], 
+                    exact: bool = False) -> tuple[int, int] | tuple[None, None]:
+    """Devuelve las coordenadas de la primera coincidencia."""
+    # Normalizamos términos
+    terms_clean = _clean_str_or_liststr(terms_clean)
+    # Normalizamos DataFrame
+    df_str_clean = _clean_df(df)
+    # Máscara booleana
+    mask = _build_mask_to_search(df_str_clean, terms_clean, exact)
+    # Todas las coincidencias (filtrar solo True)
+    stacked = mask.stack()
+    assert isinstance(stacked, pd.Series)  # ayuda al type checker
+    matches = stacked[stacked]
     if matches.empty:
-        return None
+        return (None, None)
+    row, colname = matches.index[0]
+    rowidx = df.index.get_indexer([row])[0]
+    colidx = df.columns.get_indexer([colname])[0]
+    return (rowidx, colidx)
 
-    if occurrence == "first":
-        pos = 0
-    elif occurrence == "last":
-        pos = -1
-    elif isinstance(occurrence, int) and occurrence > 0:
-        pos = occurrence - 1
-        if pos >= len(matches):
-            pos = -1
-    else:
-        raise ValueError("occurrence debe ser 'first', 'last' o un entero positivo.")
+def _process_single_eeff_file(key: str, raw_dir: str, logger: utils.logging.Logger) -> pd.DataFrame:
+    """Procesa un único archivo de EEFF, desde la lectura hasta la transformación."""
+    file_path = os.path.join(raw_dir, f'{key}.xls')
+    dataset_eeff = None
+    for sheet in [1, 0]:  # Intenta leer la hoja 1, luego la 0
+        try:
+            dataset_eeff = pd.read_excel(file_path, sheet_name=sheet)
+            logger.debug(f"Datos leídos desde la hoja {sheet} del archivo '{key}'.")
+            break
+        except Exception:
+            logger.debug(f"No se pudo leer la hoja {sheet} de '{key}'. Intentando siguiente.")
 
-    row_label, col_label = matches.index[pos]
-    row_idx = df.index.get_loc(row_label)
-    col_idx = df.columns.get_loc(col_label)
-    return row_idx, col_idx
+    if dataset_eeff is None:
+        raise FileNotFoundError(f"No se encontraron hojas de datos válidas en '{key}'.")
 
+    # Extracción de metadatos del nombre del archivo
+    date = int(key.split('_')[-1])
+    year = int(key.split('_')[-1][:4])
+    month_num = int(key.split('_')[-1][-2:])
+    month_name = MONTHS_MAP[month_num - 1]
+    kind = ' '.join(key.split('_')[:2])
 
-def process_dataset(new_files: List[str]):
+    dataset_eeff = dataset_eeff.dropna(axis=0, how='all').dropna(axis=1, how='all').reset_index(drop=True)
+
+    # Localización de filas clave
+    pos_if = _localize(dataset_eeff, FINANCIAL_INCOME_TERMS, exact=True)
+    pos_isf = _localize(dataset_eeff, SERVICE_INCOME_TERMS, exact=True)
+    pos_rn = _localize(dataset_eeff, NET_RESULT_TERMS, exact=True)
+
+    if not all([pos_if, pos_isf, pos_rn]):
+        missing = []
+        if not pos_if: missing.append("Ingresos Financieros")
+        if not pos_isf: missing.append("Servicios Financieros")
+        if not pos_rn: missing.append("Resultado Neto")
+        raise ValueError(f"No se encontraron las filas clave: {', '.join(missing)}.")
+
+    idx_row_if, idx_col_if = pos_if
+    idx_row_isf, _ = pos_isf
+    idx_row_rn, _ = pos_rn
+
+    # Construcción del DataFrame
+    heads = dataset_eeff.iloc[(idx_row_if - 2):(idx_row_if), idx_col_if:].T.fillna(method='ffill')
+    heads.columns = ['ENTIDAD', 'MONEDA']
+    heads = pd.MultiIndex.from_frame(heads)
+
+    data_rows = {
+        'INGRESOS FINANCIEROS': dataset_eeff.iloc[idx_row_if, idx_col_if:].values,
+        'INGRESOS SERVICIOS FINANCIEROS': dataset_eeff.iloc[idx_row_isf, idx_col_if:].values,
+        'RESULTADO NETO': dataset_eeff.iloc[idx_row_rn, idx_col_if:].values
+    }
+
+    temp_df = pd.DataFrame(data_rows, index=heads).T
+
+    # Limpieza y enriquecimiento del DataFrame
+    processed_df = (
+        temp_df
+        .apply(pd.to_numeric, errors="coerce").dropna(axis=0, how='all').reset_index()
+        .pipe(lambda df: df[~(
+                    df['ENTIDAD'].str.lower().str.startswith('total') | df['ENTIDAD'].str.lower().str.contains(
+                'sucursal'))])
+        .assign(
+            ENTIDAD=lambda df: df["ENTIDAD"].astype(str).str.replace(r"[\d*/()]", "", regex=True).str.strip(),
+            DATE=date, PERIODO=year, MES=month_name, TIPO=kind,
+            INGRESO=lambda df: df["INGRESOS FINANCIEROS"] + df["INGRESOS SERVICIOS FINANCIEROS"]
+        )
+        [['DATE', 'PERIODO', 'MES', 'TIPO', 'ENTIDAD', 'MONEDA', 'INGRESOS FINANCIEROS',
+          'INGRESOS SERVICIOS FINANCIEROS', 'INGRESO', 'RESULTADO NETO']]
+    )
+    
+    return processed_df
+
+def process_dataset(new_files: list[str]):
     """
     Función principal que orquesta el procesamiento de los datasets descargados.
     """
@@ -179,73 +264,9 @@ def process_dataset(new_files: List[str]):
     logger.info("<<< Fin del procesamiento de datos. 🎉")
 
 
-def _process_single_eeff_file(key: str, raw_dir: str, logger: utils.logging.Logger) -> Optional[pd.DataFrame]:
-    """Procesa un único archivo de EEFF, desde la lectura hasta la transformación."""
-    file_path = os.path.join(raw_dir, f'{key}.xls')
-    dataset_eeff = None
-    for sheet in [1, 0]:  # Intenta leer la hoja 1, luego la 0
-        try:
-            dataset_eeff = pd.read_excel(file_path, sheet_name=sheet)
-            logger.debug(f"Datos leídos desde la hoja {sheet} del archivo '{key}'.")
-            break
-        except Exception:
-            logger.debug(f"No se pudo leer la hoja {sheet} de '{key}'. Intentando siguiente.")
 
-    if dataset_eeff is None:
-        raise FileNotFoundError(f"No se encontraron hojas de datos válidas en '{key}'.")
 
-    # Extracción de metadatos del nombre del archivo
-    date = int(key.split('_')[-1])
-    year = int(key.split('_')[-1][:4])
-    month_num = int(key.split('_')[-1][-2:])
-    month_name = MONTHS_MAP[month_num - 1]
-    kind = ' '.join(key.split('_')[:2])
 
-    dataset_eeff = dataset_eeff.dropna(axis=0, how='all').dropna(axis=1, how='all').reset_index(drop=True)
 
-    # Localización de filas clave
-    pos_if = _localize(dataset_eeff, FINANCIAL_INCOME_TERMS, exact=True)
-    pos_isf = _localize(dataset_eeff, SERVICE_INCOME_TERMS, exact=True)
-    pos_rn = _localize(dataset_eeff, NET_RESULT_TERMS, exact=True)
 
-    if not all([pos_if, pos_isf, pos_rn]):
-        missing = []
-        if not pos_if: missing.append("Ingresos Financieros")
-        if not pos_isf: missing.append("Servicios Financieros")
-        if not pos_rn: missing.append("Resultado Neto")
-        raise ValueError(f"No se encontraron las filas clave: {', '.join(missing)}.")
 
-    idx_row_if, idx_col_if = pos_if
-    idx_row_isf, _ = pos_isf
-    idx_row_rn, _ = pos_rn
-
-    # Construcción del DataFrame
-    heads = dataset_eeff.iloc[(idx_row_if - 2):(idx_row_if), idx_col_if:].T.fillna(method='ffill')
-    heads.columns = ['ENTIDAD', 'MONEDA']
-    heads = pd.MultiIndex.from_frame(heads)
-
-    data_rows = {
-        'INGRESOS FINANCIEROS': dataset_eeff.iloc[idx_row_if, idx_col_if:].values,
-        'INGRESOS SERVICIOS FINANCIEROS': dataset_eeff.iloc[idx_row_isf, idx_col_if:].values,
-        'RESULTADO NETO': dataset_eeff.iloc[idx_row_rn, idx_col_if:].values
-    }
-
-    temp_df = pd.DataFrame(data_rows, index=heads).T
-
-    # Limpieza y enriquecimiento del DataFrame
-    processed_df = (
-        temp_df
-        .apply(pd.to_numeric, errors="coerce").dropna(axis=0, how='all').reset_index()
-        .pipe(lambda df: df[~(
-                    df['ENTIDAD'].str.lower().str.startswith('total') | df['ENTIDAD'].str.lower().str.contains(
-                'sucursal'))])
-        .assign(
-            ENTIDAD=lambda df: df["ENTIDAD"].astype(str).str.replace(r"[\d*/()]", "", regex=True).str.strip(),
-            DATE=date, PERIODO=year, MES=month_name, TIPO=kind,
-            INGRESO=lambda df: df["INGRESOS FINANCIEROS"] + df["INGRESOS SERVICIOS FINANCIEROS"]
-        )
-        [['DATE', 'PERIODO', 'MES', 'TIPO', 'ENTIDAD', 'MONEDA', 'INGRESOS FINANCIEROS',
-          'INGRESOS SERVICIOS FINANCIEROS', 'INGRESO', 'RESULTADO NETO']]
-    )
-    
-    return processed_df

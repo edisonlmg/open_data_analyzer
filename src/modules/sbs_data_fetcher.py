@@ -8,7 +8,6 @@ from io import BytesIO
 from pathlib import Path
 from datetime import datetime
 from itertools import product
-from typing import Tuple, List, Dict, Set
 # os.chdir(
 #     os.path.dirname(
 #         os.path.dirname(
@@ -24,7 +23,7 @@ if __name__ == "__main__":
 
 import src.utils as utils
 
-def _expected_dates(start_year: int = 2002, period: str = 'M') -> Set[str]:
+def _expected_dates(start_year: int = 2002, period: str = 'M') -> set[str]:
     # --- Construye la lista de fechas esperadas en formato 'AAAAMM' ---
     if period not in ['M', 'Q']:
         raise ValueError("El parámetro 'period' debe ser 'M' (mensual) o 'Q' (trimestral).")
@@ -39,7 +38,7 @@ def _expected_dates(start_year: int = 2002, period: str = 'M') -> Set[str]:
     return expected_dates
 
 def _existing_dates(path_file: str, doc_type: str, type_col: str = 'TIPO', 
-                    date_col: str = 'DATE') -> Set[str]:
+                    date_col: str = 'DATE') -> set[str]:
     # --- Extrae las fechas existentes en el DataFrame en formato 'AAAAMM' ---
     df = pd.read_csv(path_file)
     df = df[df[type_col] == doc_type]
@@ -48,7 +47,7 @@ def _existing_dates(path_file: str, doc_type: str, type_col: str = 'TIPO',
     return existing_dates
 
 def _missing_dates(path_file: str, doc_type: str, type_col: str = 'TIPO', date_col: str = 'DATE',
-                    period: str = 'M', start_year: int = 2002) -> List[str]:
+                    period: str = 'M', start_year: int = 2002) -> list[str]:
     # --- Identifica las fechas faltantes en el dataset ---
     if not os.path.exists(path_file):
         missing_dates = sorted(list(_expected_dates(start_year, period)))
@@ -61,7 +60,7 @@ def _missing_dates(path_file: str, doc_type: str, type_col: str = 'TIPO', date_c
     return missing_dates
     
 def _list_tuples_dates(path_file: str, doc_type: str, type_col: str = 'TIPO', date_col: str = 'DATE', period: str = 'M', 
-                   start_year: int = 2002) -> List[Tuple[str, Tuple[str, str, str]]]:
+                   start_year: int = 2002) -> list[tuple[str, tuple[str, str, str]]]:
     # --- Construye la lista de combinaciones de año y mes para formar las url ---
     months_map = [
         'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
@@ -113,7 +112,7 @@ def _build_dic_dataset_urls(path_file: str, type_col: str = 'TIPO', date_col: st
     return dic_datasets_urls
 
 def download_dataset(path_file: str, type_col: str = 'TIPO', date_col: str = 'DATE', 
-                     start_year: int = 2002) -> Tuple[bool, Dict[str, BytesIO]]:
+                     start_year: int = 2002) -> tuple[bool, dict[str, BytesIO]]:
     """
     Descarga datasets y los mantiene en memoria (BytesIO) sin guardarlos localmente.
     
