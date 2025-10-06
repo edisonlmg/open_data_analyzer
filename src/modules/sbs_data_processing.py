@@ -13,10 +13,13 @@ if __name__ == "__main__":
 
 import src.utils as utils
 from src.modules.sbs_data_fetcher import download_dataset
+from src.modules.gcs_manager import GCSManager
 
-path_file = os.path.join('data/SBS_EEFF_ANALYZED.csv')
-
-was_downloaded, files_in_memory = download_dataset(path_file)
+bucket_name = 'opendataanalyzer_datas'
+path_file = 'SBS_EEFF_ANALYZED.csv'
+gcs_manager = GCSManager()
+sbs_eeff_analyzed = gcs_manager.download_csv_as_df(bucket_name, path_file)
+was_downloaded, files_in_memory = download_dataset(sbs_eeff_analyzed)
 
 def _open_excel_in_memory_as_df(file_in_memory: io.BytesIO,
                                 sheet_open_first: int = 2) -> pd.DataFrame:

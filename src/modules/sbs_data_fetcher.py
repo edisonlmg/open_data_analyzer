@@ -8,14 +8,6 @@ from io import BytesIO
 from pathlib import Path
 from datetime import datetime
 from itertools import product
-# os.chdir(
-#     os.path.dirname(
-#         os.path.dirname(
-#             os.path.dirname(
-#                 os.path.abspath(__file__))
-#                 )
-#         )
-#     )
 
 if __name__ == "__main__":
     project_root = Path(__file__).parent.parent.parent
@@ -37,29 +29,28 @@ def _expected_dates(start_year: int = 2002, period: str = 'M') -> set[str]:
         )
     return expected_dates
 
-def _existing_dates(path_file: str, doc_type: str, type_col: str = 'TIPO', 
+def _existing_dates(df: pd.DataFrame, doc_type: str, type_col: str = 'TIPO', 
                     date_col: str = 'DATE') -> set[str]:
     # --- Extrae las fechas existentes en el DataFrame en formato 'AAAAMM' ---
-    df = pd.read_csv(path_file)
     df = df[df[type_col] == doc_type]
     df[date_col] = df[date_col].astype(str)
     existing_dates = set(df[date_col])
     return existing_dates
 
-def _missing_dates(path_file: str, doc_type: str, type_col: str = 'TIPO', date_col: str = 'DATE',
+def _missing_dates(df: pd.DataFrame, doc_type: str, type_col: str = 'TIPO', date_col: str = 'DATE',
                     period: str = 'M', start_year: int = 2002) -> list[str]:
     # --- Identifica las fechas faltantes en el dataset ---
-    if not os.path.exists(path_file):
+    if df.empty:
         missing_dates = sorted(list(_expected_dates(start_year, period)))
     else:
         expected_dates = _expected_dates(start_year, period)
-        existing_dates = _existing_dates(path_file, doc_type, type_col, date_col)
+        existing_dates = _existing_dates(df, doc_type, type_col, date_col)
         if not existing_dates.issubset(expected_dates):
             raise ValueError("El DataFrame contiene fechas fuera del rango esperado.")
         missing_dates = sorted(list(expected_dates - existing_dates))
     return missing_dates
     
-def _list_tuples_dates(path_file: str, doc_type: str, type_col: str = 'TIPO', date_col: str = 'DATE', period: str = 'M', 
+def _list_tuples_dates(df: pd.DataFrame, doc_type: str, type_col: str = 'TIPO', date_col: str = 'DATE', period: str = 'M', 
                    start_year: int = 2002) -> list[tuple[str, tuple[str, str, str]]]:
     # --- Construye la lista de combinaciones de año y mes para formar las url ---
     months_map = [
@@ -70,7 +61,7 @@ def _list_tuples_dates(path_file: str, doc_type: str, type_col: str = 'TIPO', da
         'en', 'fe', 'ma', 'ab', 'my', 'jn',
         'jl', 'ag', 'se', 'oc', 'no', 'di'
     ]
-    missing_dates = _missing_dates(path_file, doc_type, type_col, date_col, period, start_year)
+    missing_dates = _missing_dates(df, doc_type, type_col, date_col, period, start_year)
     years = sorted(list(set([date[:4] for date in missing_dates])))
     months = sorted(list(set([int(date[4:]) for date in missing_dates])))
     months_list_tuples = [
@@ -80,7 +71,7 @@ def _list_tuples_dates(path_file: str, doc_type: str, type_col: str = 'TIPO', da
     list_tuples_dates = list(product(years, months_list_tuples))
     return list_tuples_dates
 
-def _build_dic_dataset_urls(path_file: str, type_col: str = 'TIPO', date_col: str = 'DATE', 
+def _build_dic_dataset_urls(df: pd.DataFrame, type_col: str = 'TIPO', date_col: str = 'DATE', 
                             start_year: int = 2002) -> dict:
     # --- Construye las URLs de los datasets faltantes ---
     # Plantillas para nombres y URLs
@@ -104,14 +95,14 @@ def _build_dic_dataset_urls(path_file: str, type_col: str = 'TIPO', date_col: st
     for key, value in urls_templates.items():
         period = 'Q' if key in ['Cooperativas_Nivel2a_EEFF','Cooperativas_Nivel1_EEFF'] else 'M'
         doc_type = ' '.join(key.split('_')[:-1])
-        list_tuples_dates = _list_tuples_dates(path_file, doc_type, type_col, date_col, period, start_year)
+        list_tuples_dates = _list_tuples_dates(df, doc_type, type_col, date_col, period, start_year)
         for (year, (month, month_long, month_short)), (name_prefix, code) in product(list_tuples_dates, [(key, value)]):
             key = f'{name_prefix}_{year}{month}'
             url = f'https://intranet2.sbs.gob.pe/estadistica/financiera/{year}/{month_long}/{code}-{month_short}{year}.XLS'
             dic_datasets_urls[key] = url
     return dic_datasets_urls
 
-def download_dataset(path_file: str, type_col: str = 'TIPO', date_col: str = 'DATE', 
+def download_dataset(df: pd.DataFrame, type_col: str = 'TIPO', date_col: str = 'DATE', 
                      start_year: int = 2002) -> tuple[bool, dict[str, BytesIO]]:
     """
     Descarga datasets y los mantiene en memoria (BytesIO) sin guardarlos localmente.
@@ -123,7 +114,7 @@ def download_dataset(path_file: str, type_col: str = 'TIPO', date_col: str = 'DA
     """
     logger = utils.get_logger('SBS')
     logger.info(">>> Realizando el proceso de descarga de datasets en memoria...")
-    build_dic_dataset_urls = _build_dic_dataset_urls(path_file, type_col, date_col, start_year)
+    build_dic_dataset_urls = _build_dic_dataset_urls(df, type_col, date_col, start_year)
     # Diccionario para almacenar archivos en memoria
     files_in_memory = {}
     for file_name, url in build_dic_dataset_urls.items():
@@ -149,9 +140,17 @@ def download_dataset(path_file: str, type_col: str = 'TIPO', date_col: str = 'DA
     return was_downloaded, files_in_memory
 
 if __name__ == "__main__":
-    path_file = os.path.normpath('data/processed/sbs_eeff_analyzed.csv')
-    was_downloaded, files_in_memory = download_dataset(path_file)
-    if was_downloaded:
-        print(f"Se cargaron {len(files_in_memory)} archivos en memoria.")
+    from src.modules.gcs_manager import GCSManager
+    bucket_name = 'opendataanalyzer_datas'
+    path_file = 'SBS_EEFF_ANALYZED.csv'
+    gcs_manager = GCSManager()
+    sbs_eeff_analyzed = gcs_manager.download_csv_as_df(bucket_name, path_file)
+    # ✅ Validar antes de continuar
+    if sbs_eeff_analyzed is not None:
+        was_downloaded, files_in_memory = download_dataset(sbs_eeff_analyzed)
+        if was_downloaded:
+            print(f"Se cargaron {len(files_in_memory)} archivos en memoria.")
+        else:
+            print("No se encontraron archivos para descargar.")
     else:
-        print("No se encontraron archivos para descargar.")
+        print(f"Error: No se pudo cargar el archivo {path_file} desde GCS.")
