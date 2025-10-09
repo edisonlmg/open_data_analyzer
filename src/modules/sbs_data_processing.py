@@ -19,7 +19,7 @@ bucket_name = 'opendataanalyzer_datas'
 path_file = 'SBS_EEFF_ANALYZED.csv'
 gcs_manager = GCSManager()
 sbs_eeff_analyzed = gcs_manager.download_csv_as_df(bucket_name, path_file)
-was_downloaded, files_in_memory = download_dataset(sbs_eeff_analyzed)
+was_downloaded, files_in_memory = download_dataset(None)
 
 def _open_excel_in_memory_as_df(file_in_memory: io.BytesIO,
                                 sheet_open_first: int = 2) -> pd.DataFrame:
@@ -57,32 +57,17 @@ def _convert_excels_in_dict_to_df(dict_datasets_bytesio: dict,
         logger.info(f"Total de archivos omitidos: {errores_count}")
     return dict_datasets_df
 
-
-# --- Variables de Configuración ---
-MONTHS_MAP = [
-    'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
-    'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'
-]
-FINANCIAL_INCOME_TERMS = "INGRESOS FINANCIEROS"
-SERVICE_INCOME_TERMS = "INGRESOS POR SERVICIOS FINANCIEROS"
-NET_RESULT_TERMS = [
-    "RESULTADO NETO DEL EJERCICIO",
-    "UTILIDAD ( PÉRDIDA ) NETA",
-    "UTILIDAD (PÉRDIDA) NETA"
-]
-
-
-def _extract_metadata_from_filename(filename: str) -> tuple[int, int, int, str, str]:
+def _extract_metadata_from_filename(filename: str, months_map: list[str]) -> tuple[int, int, str, str]:
     # --- Extrae metadatos del nombre del archivo ---
     try:
         date = int(filename.split('_')[-1])
         year = int(filename.split('_')[-1][:4])
         month_num = int(filename.split('_')[-1][-2:])
-        month_name = MONTHS_MAP[month_num - 1]
-        kind = ' '.join(key.split('_')[:2])
+        month_name = months_map[month_num - 1]
+        kind = ' '.join(filename.split('_')[:2])
     except (IndexError, ValueError):
         raise ValueError(f"El nombre del archivo '{filename}' no sigue el formato esperado.")
-    return date, year, month_num, month_name, kind
+    return date, year, month_name, kind
 
 def _clean_str_or_liststr(terms: str | list[str]) -> list[str]:
     # --- Limpia y normaliza una cadena o lista de cadenas para búsqueda. ---
@@ -94,17 +79,16 @@ def _clean_str_or_liststr(terms: str | list[str]) -> list[str]:
 
 def _clean_df(df: pd.DataFrame) -> pd.DataFrame:
     # --- Limpia y normaliza un DataFrame para búsqueda. ---
-    df_str = df.astype(str).where(df.notna(), "")
     df_str = (
-        df_str
+        df
         .dropna(axis=0, how='all')
         .dropna(axis=1, how='all')
         .reset_index(drop=True)
         )
-    df_str = df_str.map(lambda x: x.strip().lower())
+    df_str = df_str.astype(str).where(df_str.notna(), "")
     return df_str
 
-def _build_mask_to_search(df: pd.DataFrame, terms: list[str], exact: bool) -> pd.DataFrame:
+def _build_mask_to_search(df: pd.DataFrame, terms: list|str, exact: bool = True) -> pd.DataFrame:
     # --- Construye una máscara booleana para buscar términos en un DataFrame. ---
     if exact:
         mask = df.isin(terms)
@@ -115,12 +99,12 @@ def _build_mask_to_search(df: pd.DataFrame, terms: list[str], exact: bool) -> pd
     return mask
 
 def _localize_terms(df: pd.DataFrame, terms_clean: list[str], 
-                    exact: bool = False) -> tuple[int, int] | tuple[None, None]:
+                    exact: bool = True) -> tuple[int, int] | tuple[None, None]:
     """Devuelve las coordenadas de la primera coincidencia."""
     # Normalizamos términos
     terms_clean = _clean_str_or_liststr(terms_clean)
     # Normalizamos DataFrame
-    df_str_clean = _clean_df(df)
+    df_str_clean = _clean_df(df).map(lambda x: x.strip().lower())
     # Máscara booleana
     mask = _build_mask_to_search(df_str_clean, terms_clean, exact)
     # Todas las coincidencias (filtrar solo True)
@@ -133,15 +117,6 @@ def _localize_terms(df: pd.DataFrame, terms_clean: list[str],
     rowidx = df.index.get_indexer([row])[0]
     colidx = df.columns.get_indexer([colname])[0]
     return rowidx, colidx
-
-def _missing_terms(positions_terms: list[tuple[int, int]], terms: list[str]) -> list[str]:
-    # --- Identifica términos que no se encontraron en el DataFrame ---
-    if not all(positions_terms):
-        missing = []
-        if not positions_terms[0]: missing.append(terms[0])
-        if not pos_isf: missing.append("Servicios Financieros")
-        if not pos_rn: missing.append("Resultado Neto")
-        raise ValueError(f"No se encontraron las filas clave: {', '.join(missing)}.")
 
 def _build_eeff_dataframe(dataset_eeff: pd.DataFrame, pos_if: tuple[int, int],
                           pos_isf: tuple[int, int], pos_rn: tuple[int, int]) -> pd.DataFrame:
@@ -164,85 +139,58 @@ def _build_eeff_dataframe(dataset_eeff: pd.DataFrame, pos_if: tuple[int, int],
         'INGRESOS SERVICIOS FINANCIEROS': dataset_eeff.iloc[idx_row_isf, idx_col_if:].values,
         'RESULTADO NETO': dataset_eeff.iloc[idx_row_rn, idx_col_if:].values
     }
-    temp_df = pd.DataFrame(data_rows, index=heads).T
+    temp_df = pd.DataFrame(data_rows, index=heads)
     return temp_df
 
+def _transform_eeff_dataframe(key: str, dataset_eeff: pd.DataFrame, 
+                              months_map: list[str]) -> pd.DataFrame | None:
+    # --- Transforma un DataFrame de EEFF en el formato final esperado ---
+    if dataset_eeff is None or dataset_eeff.empty:
+        return None
+    date, year, month_name, kind = _extract_metadata_from_filename(key, months_map)
+    df_processed = (
+        dataset_eeff
+        .apply(pd.to_numeric, errors="coerce").dropna(axis=0, how='all').reset_index()
+        .reset_index()
+        .assign(
+            ENTIDAD =lambda df: df["ENTIDAD"].astype(str).str.strip().replace('', None).ffill()
+        )
+        .pipe(lambda df: df[~(
+                    df['ENTIDAD'].str.lower().str.startswith('total') 
+                    | df['ENTIDAD'].str.lower().str.contains('sucursal'))])
+        .assign(
+            ENTIDAD=lambda df: df["ENTIDAD"].astype(str).str.replace(r"[\d*/()]", "", regex=True),
+            DATE=date, PERIODO=year, MES=month_name, TIPO=kind,
+            INGRESO=lambda df: df["INGRESOS FINANCIEROS"] + df["INGRESOS SERVICIOS FINANCIEROS"]
+        )
+        [['DATE', 'PERIODO', 'MES', 'TIPO', 'ENTIDAD', 'MONEDA', 'INGRESOS FINANCIEROS',
+          'INGRESOS SERVICIOS FINANCIEROS', 'INGRESO', 'RESULTADO NETO']]
+    )
+    return df_processed
 
-def _process_single_eeff_file(dict_datasets: dict) -> dict:
-    # --- Construye 
-   
-   for key, value in dict_datasets.items():
-        if 'EEFF' in key:
-            try:
-                dataset_eeff = _open_dataset(value)
-                if dataset_eeff is None:
-                    raise ValueError("No se pudo abrir el dataset de EEFF.")
-            except Exception as e:
-                raise ValueError(f"No se pudo abrir el dataset de EEFF de '{key}': {e}", exc_info=False)
-                continue
+# -------------------------------------------------------------------------------------------
 
-            # try:
-            #     date, year, month_num, month_name, kind = _extract_metadata_from_filename(key)
-            # except ValueError as e:
-            #     logger.error(f"Error al extraer metadatos del nombre del archivo '{key}': {e}", exc_info=False)
-            #     continue
+MONTHS_MAP = [
+    'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
+    'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'
+]
+FINANCIAL_INCOME_TERMS = "INGRESOS FINANCIEROS"
+SERVICE_INCOME_TERMS = "INGRESOS POR SERVICIOS FINANCIEROS"
+NET_RESULT_TERMS = [
+    "RESULTADO NETO DEL EJERCICIO",
+    "UTILIDAD ( PÉRDIDA ) NETA",
+    "UTILIDAD (PÉRDIDA) NETA"
+]
 
-            # try:
-            #     pos_if = _localize_terms(dataset_eeff, FINANCIAL_INCOME_TERMS, exact=True)
-            #     pos_isf = _localize_terms(dataset_eeff, SERVICE_INCOME_TERMS, exact=True)
-            #     pos_rn = _localize_terms(dataset_eeff, NET_RESULT_TERMS, exact=False)
+def _missing_terms(positions_terms: list[tuple[int, int]], terms: list[str]) -> list[str]:
+    # --- Identifica términos que no se encontraron en el DataFrame ---
+    if not all(positions_terms):
+        missing = []
+        if not positions_terms[0]: missing.append(terms[0])
+        if not pos_isf: missing.append("Servicios Financieros")
+        if not pos_rn: missing.append("Resultado Neto")
+        raise ValueError(f"No se encontraron las filas clave: {', '.join(missing)}.")
 
-            #     _missing_terms([pos_if, pos_isf, pos_rn], 
-            #                    [FINANCIAL_INCOME_TERMS, SERVICE_INCOME_TERMS, "Resultado Neto"])
-            # except ValueError as e:
-            #     logger.error(f"Error al localizar términos en '{key}': {e}", exc_info=False)
-            #     continue
-
-            # try:
-            #     processed_df = _build_eeff_dataframe(dataset_eeff, pos_if, pos_isf, pos_rn)
-            # except Exception as e:
-            #     logger.error(f"Error al construir DataFrame de EEFF para '{key}': {e}", exc_info=False)
-            #     continue
-
-            # # Enriquecimiento del DataFrame
-            # processed_df = (
-            #     processed_df
-            #     .apply(pd.to_numeric, errors="coerce").dropna(axis=0, how='all').reset_index()
-            #     .pipe(lambda df: df[~(
-            #                 df['ENTIDAD'].str.lower().str.startswith('total') | df['ENTIDAD'].str.lower().str.contains(
-            #             'sucursal'))])
-            #     .assign(
-            #         ENTIDAD=lambda df: df["ENTIDAD"].astype(str).str.replace(r"[\d*/()]", "", regex=True).str.strip(),
-            #         DATE=date, PERIODO=year, MES=month_name, TIPO=kind,
-            #         INGRESO=lambda df: df["INGRESOS FIN
-      
-    # # Localización de filas clave
-    # pos_if = _localize_terms(dataset_eeff, FINANCIAL_INCOME_TERMS, exact=True)
-    # pos_isf = _localize_terms(dataset_eeff, SERVICE_INCOME_TERMS, exact=True)
-    # pos_rn = _localize_terms(dataset_eeff, NET_RESULT_TERMS, exact=True)
-
-    # idx_row_if, idx_col_if = pos_if
-    # idx_row_isf, _ = pos_isf
-    # idx_row_rn, _ = pos_rn
-
-    
-    # # Limpieza y enriquecimiento del DataFrame
-    # processed_df = (
-    #     temp_df
-    #     .apply(pd.to_numeric, errors="coerce").dropna(axis=0, how='all').reset_index()
-    #     .pipe(lambda df: df[~(
-    #                 df['ENTIDAD'].str.lower().str.startswith('total') | df['ENTIDAD'].str.lower().str.contains(
-    #             'sucursal'))])
-    #     .assign(
-    #         ENTIDAD=lambda df: df["ENTIDAD"].astype(str).str.replace(r"[\d*/()]", "", regex=True).str.strip(),
-    #         DATE=date, PERIODO=year, MES=month_name, TIPO=kind,
-    #         INGRESO=lambda df: df["INGRESOS FINANCIEROS"] + df["INGRESOS SERVICIOS FINANCIEROS"]
-    #     )
-    #     [['DATE', 'PERIODO', 'MES', 'TIPO', 'ENTIDAD', 'MONEDA', 'INGRESOS FINANCIEROS',
-    #       'INGRESOS SERVICIOS FINANCIEROS', 'INGRESO', 'RESULTADO NETO']]
-    # )
-    
-    return dict_datasets
 
 def process_dataset(new_files: list[str]):
     """

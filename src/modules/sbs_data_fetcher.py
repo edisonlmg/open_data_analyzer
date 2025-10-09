@@ -37,10 +37,10 @@ def _existing_dates(df: pd.DataFrame, doc_type: str, type_col: str = 'TIPO',
     existing_dates = set(df[date_col])
     return existing_dates
 
-def _missing_dates(df: pd.DataFrame, doc_type: str, type_col: str = 'TIPO', date_col: str = 'DATE',
+def _missing_dates(df: pd.DataFrame|None, doc_type: str, type_col: str = 'TIPO', date_col: str = 'DATE',
                     period: str = 'M', start_year: int = 2002) -> list[str]:
     # --- Identifica las fechas faltantes en el dataset ---
-    if df.empty:
+    if df is None or df.empty:
         missing_dates = sorted(list(_expected_dates(start_year, period)))
     else:
         expected_dates = _expected_dates(start_year, period)
@@ -50,8 +50,8 @@ def _missing_dates(df: pd.DataFrame, doc_type: str, type_col: str = 'TIPO', date
         missing_dates = sorted(list(expected_dates - existing_dates))
     return missing_dates
     
-def _list_tuples_dates(df: pd.DataFrame, doc_type: str, type_col: str = 'TIPO', date_col: str = 'DATE', period: str = 'M', 
-                   start_year: int = 2002) -> list[tuple[str, tuple[str, str, str]]]:
+def _tuples_dates(df: pd.DataFrame, doc_type: str, type_col: str = 'TIPO', date_col: str = 'DATE', period: str = 'M', 
+                   start_year: int = 2002) -> tuple:
     # --- Construye la lista de combinaciones de año y mes para formar las url ---
     months_map = [
         'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
@@ -62,14 +62,14 @@ def _list_tuples_dates(df: pd.DataFrame, doc_type: str, type_col: str = 'TIPO', 
         'jl', 'ag', 'se', 'oc', 'no', 'di'
     ]
     missing_dates = _missing_dates(df, doc_type, type_col, date_col, period, start_year)
-    years = sorted(list(set([date[:4] for date in missing_dates])))
-    months = sorted(list(set([int(date[4:]) for date in missing_dates])))
-    months_list_tuples = [
-        (str(month).zfill(2),months_map[month-1], months_short_map[month-1]) 
-        for month in months
-        ]
-    list_tuples_dates = list(product(years, months_list_tuples))
-    return list_tuples_dates
+    tuples_dates = tuple()
+    for date in missing_dates:
+        year = date[:4]
+        month = int(date[4:])
+        tuples_dates += (
+            (year, (str(month).zfill(2),months_map[month-1], months_short_map[month-1])),
+            )
+    return tuples_dates
 
 def _build_dic_dataset_urls(df: pd.DataFrame, type_col: str = 'TIPO', date_col: str = 'DATE', 
                             start_year: int = 2002) -> dict:
@@ -94,15 +94,16 @@ def _build_dic_dataset_urls(df: pd.DataFrame, type_col: str = 'TIPO', date_col: 
     dic_datasets_urls = {}
     for key, value in urls_templates.items():
         period = 'Q' if key in ['Cooperativas_Nivel2a_EEFF','Cooperativas_Nivel1_EEFF'] else 'M'
+        start_year = 2023 if key.startswith('Cooperativas') else 2002
         doc_type = ' '.join(key.split('_')[:-1])
-        list_tuples_dates = _list_tuples_dates(df, doc_type, type_col, date_col, period, start_year)
-        for (year, (month, month_long, month_short)), (name_prefix, code) in product(list_tuples_dates, [(key, value)]):
+        tuples_dates = _tuples_dates(df, doc_type, type_col, date_col, period, start_year= start_year)
+        for (year, (month, month_long, month_short)), (name_prefix, code) in product(tuples_dates, [(key, value)]):
             key = f'{name_prefix}_{year}{month}'
             url = f'https://intranet2.sbs.gob.pe/estadistica/financiera/{year}/{month_long}/{code}-{month_short}{year}.XLS'
             dic_datasets_urls[key] = url
     return dic_datasets_urls
 
-def download_dataset(df: pd.DataFrame, type_col: str = 'TIPO', date_col: str = 'DATE', 
+def download_dataset(df: pd.DataFrame | None, type_col: str = 'TIPO', date_col: str = 'DATE', 
                      start_year: int = 2002) -> tuple[bool, dict[str, BytesIO]]:
     """
     Descarga datasets y los mantiene en memoria (BytesIO) sin guardarlos localmente.
