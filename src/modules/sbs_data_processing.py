@@ -14,7 +14,6 @@ if __name__ == "__main__":
 
 import src.utils as utils
 from src.modules.sbs_data_fetcher import download_dataset
-from src.modules.gcs_manager import GCSManager
 
 def _open_excel_in_memory_as_df(file_in_memory: io.BytesIO,
                                 sheet_open_first: int = 2) -> pd.DataFrame:
@@ -32,6 +31,7 @@ def _open_excel_in_memory_as_df(file_in_memory: io.BytesIO,
 
 def _convert_excels_in_dict_to_df(dict_datasets_bytesio: dict, 
                                    name_files: str = '',
+                                   sheet_open_first: int = 2,
                                    logger: logging.Logger | None = None) -> dict:
     # --- Convierte diccionario de archivos Excel en memoria a DataFrames. ---
     dict_datasets_df = {}
@@ -39,7 +39,7 @@ def _convert_excels_in_dict_to_df(dict_datasets_bytesio: dict,
     for key, value in dict_datasets_bytesio.items():
         if name_files in key:
             try:
-                dict_datasets_df[key] = _open_excel_in_memory_as_df(value)
+                dict_datasets_df[key] = _open_excel_in_memory_as_df(value,sheet_open_first)
             except FileNotFoundError as e:
                 errores_count += 1
                 if logger:
@@ -170,8 +170,6 @@ def _transform_eeff_dataframe(key: str, dataset_eeff: pd.DataFrame) -> pd.DataFr
     )
     return df_processed
 
-# -------------------------------------------------------------------------------------------
-
 def process_dataset_eeff(files_in_memory: dict, if_terms: str | list[str], 
                           isf_terms: str | list[str], rn_terms: str | list[str], 
                           logger: logging.Logger) -> pd.DataFrame:
@@ -206,86 +204,59 @@ def process_dataset_eeff(files_in_memory: dict, if_terms: str | list[str],
         f"Procesamiento de EEFF completado. Se procesaron {processed_count}/{len(datasets_eeff)} archivos. ✅")
     return df_eeff
 
+def _build_tc_dataframe(key: str, dataset_tc: pd.DataFrame, pos_tc: tuple) -> pd.DataFrame:
+    # Si cualquiera es (None, None) → devolver DataFrame vacío
+    if pos_tc == (None, None):
+        return pd.DataFrame()
+    # --- Construye el DataFrame final de EEFF a partir de las posiciones encontradas ---
+    list_of_tc_rows = []
+    idx_row_tc, idx_col_tc = pos_tc
+    date, year, month_name, _ = _extract_metadata_from_filename(key)
+    # Construcción del DataFrame
+    df_clean = _clean_df(dataset_tc)
+    tc_value = df_clean.iloc[idx_row_tc, idx_col_tc]  # Valor en columna adyacente
+    tc_row = pd.DataFrame({
+        'DATE': date, 'PERIODO': year, 'MES': month_name, 'TC': tc_value
+    }, index=[0])
+    list_of_tc_rows.append(tc_row)
+    if not list_of_tc_rows:
+        temp_df = pd.DataFrame()
+    else:
+        temp_df = pd.concat(list_of_tc_rows, axis=0, ignore_index=True)
+    return temp_df
 
-# def process_dataset(new_files: list[str]):
-#     """
-#     Función principal que orquesta el procesamiento de los datasets descargados.
-#     """
-#     # --- 1. Setup Inicial ---
-#     logger = utils.get_logger()
-#     logger.info(">>> Iniciando el proceso de transformación de datos...")
-#     root_dir = utils.get_project_root()
-#     output_raw_dir = os.path.join(root_dir, 'data', 'raw')
-#     output_processed_dir = os.path.join(root_dir, 'data', 'processed')
-#     os.makedirs(output_processed_dir, exist_ok=True)
-#     logger.info(f"Directorio de datos procesados verificado: '{output_processed_dir}'")
-
-#     # --- 2. Transformar Datasets de Tipo de Cambio (TC) ---
-#     logger.info("--- Iniciando sección: Transformación de Tipo de Cambio (TC) ---")
-#     list_of_tc_rows = []
-#     list_banca_eff = [f for f in new_files if 'Banca' in f and 'EEFF' in f]
-#     logger.info(f"Se encontraron {len(list_banca_eff)} archivos de 'Banca Múltiple' para extraer TC.")
-
-#     for key in tqdm(list_banca_eff, desc="Buscando TC por periodo"):
-#         try:
-#             date = int(key.split('_')[-1])
-#             year = key.split('_')[-1][:4]
-#             month_num = int(key.split('_')[-1][-2:])
-#             month_name = MONTHS_MAP[month_num - 1]
-
-#             file_path = os.path.join(output_raw_dir, f'{key}.xls')
-#             dataset_bg = pd.read_excel(file_path, sheet_name=0)
-
-#             pos = _localize(dataset_bg, "Tipo de Cambio")
-#             if pos:
-#                 idx_row, idx_col = pos
-#                 tc_value = dataset_bg.iloc[idx_row, idx_col + 1]  # Valor en columna adyacente
-#                 tc_row = pd.DataFrame({
-#                     'DATE': date, 'PERIODO': year, 'MES': month_name, 'TC': tc_value
-#                 }, index=[0])
-#                 list_of_tc_rows.append(tc_row)
-#                 logger.debug(f"TC extraído exitosamente de '{key}.xls'. Valor: {tc_value}")
-#             else:
-#                 raise ValueError("No se encontró la celda 'Tipo de Cambio'")
-#         except Exception as e:
-#             logger.error(f"No se pudo extraer TC de '{key}': {e}", exc_info=False)
-
-#     if not list_of_tc_rows:
-#         logger.warning("No se pudo extraer información de TC de ningún archivo.")
-#         df_tc = pd.DataFrame()
-#     else:
-#         df_tc = pd.concat(list_of_tc_rows, axis=0, ignore_index=True)
-#         logger.info(f"Búsqueda de TC completada. Se extrajeron {len(df_tc)} registros. ✅")
-
-#     # --- 4. Crear Datasets para Dashboards ---
-#     logger.info("--- Iniciando sección: Creación de vistas para análisis ---")
-#     if not df_eeff.empty:
-#         df_eeff_anual = df_eeff.drop_duplicates(['PERIODO', 'TIPO', 'ENTIDAD', 'MONEDA'], keep='last').reset_index(
-#             drop=True)
-
-#         df_share = (
-#             df_eeff_anual.query("MONEDA == 'TOTAL'")
-#             .assign(
-#                 TOTAL_SEGMENTO=lambda df: df.groupby(["PERIODO", "TIPO"])["INGRESO"].transform("sum"),
-#                 PARTICIPACION=lambda df: df["INGRESO"] / df["TOTAL_SEGMENTO"] * 100
-#             )
-#             [["PERIODO", "TIPO", "ENTIDAD", "PARTICIPACION"]]
-#         )
-
-#         df_hhi = (
-#             df_share.groupby(["PERIODO", "TIPO"])
-#             .agg(NUM_ENTIDADES=("ENTIDAD", "nunique"), HHI=("PARTICIPACION", lambda x: (x ** 2).sum()))
-#             .reset_index()
-#         )
-
-#         df_final = df_eeff_anual.merge(df_hhi, how="left", on=["PERIODO", "TIPO"])
-#         logger.info("Vistas de análisis (Share, HHI) creadas exitosamente. ✅")
-#     else:
-#         logger.warning("No hay datos de EEFF para crear vistas de análisis. Omitiendo este paso. ⚠️")
-#         df_final = pd.DataFrame()
+def process_dataset_tc(files_in_memory: dict, tc_terms: str | list[str],
+                       logger: logging.Logger) -> pd.DataFrame:
+    # --- Abrir datasets de EEFF ---
+    logger.info("--- Iniciando sección: Procesamiento de TC ---")
+    datasets_tc = _convert_excels_in_dict_to_df(
+        files_in_memory, name_files='Banca_Multiple_EEFF',
+        sheet_open_first=1, logger=logger
+        )
+    if not datasets_tc:
+        logger.warning("No se encontraron archivos para procesar.")
+        return pd.DataFrame()
+    # --- Procesa todos los DataFrames de EEFF y los concatena en uno solo ---
+    list_of_tc_df = []
+    processed_count = 0
+    for key, dataset_tc in datasets_tc.items():
+        try:
+            pos_tc = _localize_terms(dataset_tc, tc_terms, exact=False)
+            df_processed = _build_tc_dataframe(key, dataset_tc, pos_tc)
+            if df_processed is not None:
+                list_of_tc_df.append(df_processed)
+                processed_count += 1
+        except Exception as e:
+            logger.error(f"No se pudo procesar EEFF de '{key}': {e}", exc_info=False)
+    if not list_of_tc_df:
+        logger.warning("No se pudo procesar ningún archivo.")
+        return pd.DataFrame()
+    df_eeff = pd.concat(list_of_tc_df, axis=0, ignore_index=True)
+    logger.info(
+        f"Procesamiento completado. Se procesaron {processed_count}/{len(datasets_tc)} archivos. ✅")
+    return df_eeff
 
 if __name__ == "__main__":
-
     FINANCIAL_INCOME_TERMS = "INGRESOS FINANCIEROS"
     SERVICE_INCOME_TERMS = "INGRESOS POR SERVICIOS FINANCIEROS"
     NET_RESULT_TERMS = [
@@ -293,16 +264,32 @@ if __name__ == "__main__":
         "UTILIDAD ( PÉRDIDA ) NETA",
         "UTILIDAD (PÉRDIDA) NETA"
     ]
-
-    # bucket_name = 'opendataanalyzer_datas'
-    # path_file = 'SBS_EEFF_ANALYZED.csv'
-    # gcs_manager = GCSManager()
-    # sbs_eeff_analyzed = gcs_manager.download_csv_as_df(bucket_name, path_file)
-    was_downloaded, files_in_memory = download_dataset(None)
-
-    df = process_dataset_eeff(files_in_memory, FINANCIAL_INCOME_TERMS, 
-                              SERVICE_INCOME_TERMS, NET_RESULT_TERMS,
-                                utils.get_logger('SBS'))
-    df.to_csv('SBS_EEFF_PROCESSED.csv', index=False)
-    print(df)
+    TC_TERMS = "TIPO DE CAMBIO"
+    bucket_name = 'opendataanalyzer_datas'
+    path_file_eeff = 'SBS_EEFF_PROCESSED.csv'
+    path_file_tc = 'SBS_TC_PROCESSED.csv'
+    gcs_manager = utils.GCSManager()
+    sbs_eeff_processed = gcs_manager.download_csv_as_df(bucket_name, path_file_eeff)
+    sbs_tc_processed = gcs_manager.download_csv_as_df(bucket_name, path_file_tc)
+    if sbs_eeff_processed is not None:
+        files_in_memory = download_dataset(sbs_eeff_processed)
+        if bool(files_in_memory):
+            sbs_eeff_actualyzed = process_dataset_eeff(
+                files_in_memory, FINANCIAL_INCOME_TERMS,
+                SERVICE_INCOME_TERMS, NET_RESULT_TERMS,
+                utils.get_logger('SBS')
+                )
+            sbs_eeff_processed = pd.concat(
+                [sbs_eeff_processed, sbs_eeff_actualyzed], 
+                axis=0, ignore_index=True
+                )
+            sbs_tc_processed = process_dataset_tc(
+                files_in_memory, TC_TERMS,
+                utils.get_logger('SBS')
+                )
+        else:
+            pass
+    else:
+        pass
+    
 

@@ -104,7 +104,7 @@ def _build_dic_dataset_urls(df: pd.DataFrame, type_col: str = 'TIPO', date_col: 
     return dic_datasets_urls
 
 def download_dataset(df: pd.DataFrame | None, type_col: str = 'TIPO', date_col: str = 'DATE', 
-                     start_year: int = 2002) -> tuple[bool, dict[str, BytesIO]]:
+                     start_year: int = 2002) -> dict[str, BytesIO]:
     """
     Descarga datasets y los mantiene en memoria (BytesIO) sin guardarlos localmente.
     
@@ -131,22 +131,19 @@ def download_dataset(df: pd.DataFrame | None, type_col: str = 'TIPO', date_col: 
         except requests.RequestException as e:
             logger.error(f"Error al descargar el archivo desde {url}: {e}")
     
-    was_downloaded = bool(files_in_memory)
-    if was_downloaded:
+    if bool(files_in_memory):
         logger.info(f"Descarga finalizada. Se cargaron {len(files_in_memory)} archivos en memoria.")
     else:
         logger.info("No se encontraron archivos para descargar.")
     
-    logger.info(f"<<< Proceso de descarga finalizado. Hubo descargas en memoria?: {was_downloaded}.")
-    return was_downloaded, files_in_memory
+    logger.info(f"<<< Proceso de descarga finalizado. Hubo descargas en memoria?: {bool(files_in_memory)}.")
+    return files_in_memory
 
 if __name__ == "__main__":
-    from src.modules.gcs_manager import GCSManager
     bucket_name = 'opendataanalyzer_datas'
-    path_file = 'SBS_EEFF_ANALYZED.csv'
-    gcs_manager = GCSManager()
+    path_file = 'SBS_EEFF_PROCESSED.csv'
+    gcs_manager = utils.GCSManager()
     sbs_eeff_analyzed = gcs_manager.download_csv_as_df(bucket_name, path_file)
-    # ✅ Validar antes de continuar
     if sbs_eeff_analyzed is not None:
         was_downloaded, files_in_memory = download_dataset(sbs_eeff_analyzed)
         if was_downloaded:
