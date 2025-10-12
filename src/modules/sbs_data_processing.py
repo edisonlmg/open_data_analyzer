@@ -17,8 +17,18 @@ from src.modules.sbs_data_fetcher import download_dataset
 
 def _open_excel_in_memory_as_df(file_in_memory: io.BytesIO,
                                 sheet_open_first: int = 2) -> pd.DataFrame:
-    # --- Abre un archivo Excel en memoria como DataFrame. ---
-    # Intenta abrir desde el número de hoja especificado hacia atrás
+    """
+    Abre un archivo Excel en memoria y lo convierte en un DataFrame de pandas.
+    
+    Intenta leer el archivo Excel comenzando desde la hoja especificada por
+    `sheet_open_first` y retrocediendo hasta la primera hoja. Esto es útil
+    cuando la estructura de los reportes cambia y los datos no siempre están
+    en la misma hoja.
+    
+    Args:
+        file_in_memory: El archivo Excel como un objeto BytesIO.
+        sheet_open_first: El índice (1-based) de la hoja desde donde empezar a intentar leer.
+    """
     sheets = list(range(sheet_open_first - 1, -1, -1))  
     for sheet in sheets:
         try:
@@ -33,7 +43,11 @@ def _convert_excels_in_dict_to_df(dict_datasets_bytesio: dict,
                                    name_files: str = '',
                                    sheet_open_first: int = 2,
                                    logger: logging.Logger | None = None) -> dict:
-    # --- Convierte diccionario de archivos Excel en memoria a DataFrames. ---
+    """
+    Convierte un diccionario de archivos Excel en BytesIO a un diccionario de DataFrames.
+    
+    Filtra los archivos por un nombre clave y maneja errores si un archivo no puede ser abierto.
+    """
     dict_datasets_df = {}
     errores_count = 0
     for key, value in dict_datasets_bytesio.items():
@@ -43,20 +57,25 @@ def _convert_excels_in_dict_to_df(dict_datasets_bytesio: dict,
             except FileNotFoundError as e:
                 errores_count += 1
                 if logger:
-                    logger.warning(f"No se pudo abrir '{key}': {e}")
+                    logger.warning(f"  ⚠️ No se pudo abrir '{key}': {e}")
             except Exception as e:
                 errores_count += 1
                 if logger:
-                    logger.warning(f"Error inesperado al abrir '{key}': {e}")
+                    logger.warning(f"  ❌ Error inesperado al abrir '{key}': {e}")
     if logger and (errores_count > 0):
-        logger.info(f"Total de archivos omitidos: {errores_count}")
+        logger.info(f"  ℹ️ Total de archivos omitidos en la conversión: {errores_count}")
     return dict_datasets_df
 
 def _extract_metadata_from_filename(filename: str) -> tuple[int, int, str, str]:
-    # --- Extrae metadatos del nombre del archivo ---
+    """
+    Extrae metadatos (fecha, año, mes, tipo) del nombre de un archivo.
+    
+    El formato esperado del nombre de archivo es 'Tipo_Subtipo_AAAAMM.xls'.
+    Ej: 'Banca_Multiple_EEFF_202312'
+    """
     months_map = [
         'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
-        'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'
+        'Julio', 'Agosto', 'Setiembre', 'Octubre', 'Noviembre', 'Diciembre'
     ]
     try:
         date = int(filename.split('_')[-1])
@@ -69,15 +88,20 @@ def _extract_metadata_from_filename(filename: str) -> tuple[int, int, str, str]:
     return date, year, month_name, kind
 
 def _clean_str_or_liststr(terms: str | list[str]) -> list[str]:
-    # --- Limpia y normaliza una cadena o lista de cadenas para búsqueda. ---
+    """
+    Normaliza un término de búsqueda (o una lista de términos) a una lista de strings
+    en minúsculas y sin espacios extra.
+    """
     if isinstance(terms, str):
         terms = [terms]
-    # Normalizamos términos
     terms = [str(term).strip().lower() for term in terms]
     return terms
 
 def _clean_df(df: pd.DataFrame) -> pd.DataFrame:
-    # --- Limpia y normaliza un DataFrame para búsqueda. ---
+    """
+    Realiza una limpieza básica en un DataFrame.
+    Elimina filas y columnas que son completamente nulas y resetea el índice.
+    """
     df_str = (
         df
         .dropna(axis=0, how='all')
@@ -87,7 +111,12 @@ def _clean_df(df: pd.DataFrame) -> pd.DataFrame:
     return df_str
 
 def _build_mask_to_search(df: pd.DataFrame, terms: list|str, exact: bool = True) -> pd.DataFrame:
-    # --- Construye una máscara booleana para buscar términos en un DataFrame. ---
+    """
+    Construye una máscara booleana para buscar términos en un DataFrame.
+    
+    Args:
+        exact: Si es True, busca coincidencias exactas. Si es False, busca subcadenas.
+    """
     if exact:
         mask = df.isin(terms)
     else:
@@ -98,16 +127,18 @@ def _build_mask_to_search(df: pd.DataFrame, terms: list|str, exact: bool = True)
 
 def _localize_terms(df: pd.DataFrame, terms_clean: str | list[str], 
                     exact: bool = True) -> tuple[int, int] | tuple[None, None]:
-    """Devuelve las coordenadas de la primera coincidencia."""
-    # Normalizamos términos
+    """
+    Localiza la primera ocurrencia de un término en un DataFrame.
+    
+    Devuelve las coordenadas (fila, columna) de la primera celda que coincide con
+    alguno de los términos de búsqueda.
+    """
     terms_clean = _clean_str_or_liststr(terms_clean)
-    # Normalizamos DataFrame
     df_str_clean = _clean_df(df).astype(str)
     df_str_clean = df_str_clean.where(df_str_clean.notna(), "")
     df_str_clean = df_str_clean.map(lambda x: x.strip().lower())
-    # Máscara booleana
     mask = _build_mask_to_search(df_str_clean, terms_clean, exact)
-    # Todas las coincidencias (filtrar solo True)
+    
     stacked = mask.stack()
     assert isinstance(stacked, pd.Series)  # ayuda al type checker
     matches = stacked[stacked]
@@ -120,14 +151,20 @@ def _localize_terms(df: pd.DataFrame, terms_clean: str | list[str],
 
 def _build_eeff_dataframe(dataset_eeff: pd.DataFrame, pos_if: tuple,
                           pos_isf: tuple, pos_rn: tuple) -> pd.DataFrame:
-    # Si cualquiera es (None, None) → devolver DataFrame vacío
+    """
+    Construye un DataFrame estructurado de EEFF a partir de las posiciones encontradas.
+    
+    Utiliza las coordenadas de los términos clave ('Ingresos Financieros', etc.) para
+    extraer las cabeceras (Entidad, Moneda) y las filas de datos correspondientes,
+    creando un DataFrame intermedio listo para la transformación final.
+    """
     if pos_if == (None, None) or pos_isf == (None, None) or pos_rn == (None, None):
         return pd.DataFrame()
-    # --- Construye el DataFrame final de EEFF a partir de las posiciones encontradas ---
+    
     idx_row_if, idx_col_if = pos_if
     idx_row_isf, _ = pos_isf
     idx_row_rn, _ = pos_rn
-    # Construcción del DataFrame
+    
     df_clean = _clean_df(dataset_eeff)
     heads = (
         df_clean
@@ -146,7 +183,12 @@ def _build_eeff_dataframe(dataset_eeff: pd.DataFrame, pos_if: tuple,
     return temp_df
 
 def _transform_eeff_dataframe(key: str, dataset_eeff: pd.DataFrame) -> pd.DataFrame | None:
-    # --- Transforma un DataFrame de EEFF en el formato final esperado ---
+    """
+    Transforma un DataFrame de EEFF intermedio al formato final deseado.
+    
+    Aplica limpieza, añade columnas de metadatos (fecha, periodo, etc.), calcula
+    campos derivados y selecciona y renombra las columnas finales.
+    """
     if dataset_eeff is None or dataset_eeff.empty:
         return None
     date, year, month_name, kind = _extract_metadata_from_filename(key)
@@ -173,16 +215,20 @@ def _transform_eeff_dataframe(key: str, dataset_eeff: pd.DataFrame) -> pd.DataFr
 def process_dataset_eeff(files_in_memory: dict, if_terms: str | list[str], 
                           isf_terms: str | list[str], rn_terms: str | list[str], 
                           logger: logging.Logger) -> pd.DataFrame:
-    # --- Abrir datasets de EEFF ---
-    logger.info("--- Iniciando sección: Procesamiento de EEFF ---")
+    """
+    Procesa un diccionario de archivos Excel de EEFF en memoria y los consolida en un único DataFrame.
+    
+    Orquesta la apertura, localización de términos, construcción y transformación de cada archivo.
+    """
+    logger.info("--- 🛠️ Iniciando sección: Procesamiento de EEFF ---")
     datasets_eeff = _convert_excels_in_dict_to_df(
         files_in_memory, name_files='EEFF', logger=logger
         )
     if not datasets_eeff:
-        logger.warning("No se encontraron archivos de EEFF para procesar.")
+        logger.warning("  ⚠️ No se encontraron archivos de EEFF para procesar.")
         return pd.DataFrame()
-    # --- Procesa todos los DataFrames de EEFF y los concatena en uno solo ---
-    list_of_eeff_df = []
+    
+    processed_dfs = []
     processed_count = 0
     for key, dataset_eeff in datasets_eeff.items():
         try:
@@ -192,104 +238,73 @@ def process_dataset_eeff(files_in_memory: dict, if_terms: str | list[str],
             df = _build_eeff_dataframe(dataset_eeff, pos_if, pos_isf, pos_rn)
             df_processed = _transform_eeff_dataframe(key, df)
             if df_processed is not None:
-                list_of_eeff_df.append(df_processed)
+                processed_dfs.append(df_processed)
                 processed_count += 1
+                logger.info(f"  ✔️ Procesado EEFF de '{key}'")
         except Exception as e:
-            logger.error(f"No se pudo procesar EEFF de '{key}': {e}", exc_info=False)
-    if not list_of_eeff_df:
-        logger.warning("No se pudo procesar ningún archivo de EEFF.")
+            logger.error(f"  ❌ No se pudo procesar EEFF de '{key}': {e}", exc_info=False)
+    
+    if not processed_dfs:
+        logger.warning("  ⚠️ No se pudo procesar ningún archivo de EEFF exitosamente.")
         return pd.DataFrame()
-    df_eeff = pd.concat(list_of_eeff_df, axis=0, ignore_index=True)
+        
+    df_eeff = pd.concat(processed_dfs, axis=0, ignore_index=True)
     logger.info(
-        f"Procesamiento de EEFF completado. Se procesaron {processed_count}/{len(datasets_eeff)} archivos. ✅")
+        f"--- ✅ Procesamiento de EEFF completado. Se procesaron {processed_count}/{len(datasets_eeff)} archivos. ---")
     return df_eeff
 
-def _build_tc_dataframe(key: str, dataset_tc: pd.DataFrame, pos_tc: tuple) -> pd.DataFrame:
-    # Si cualquiera es (None, None) → devolver DataFrame vacío
+def _build_tc_dataframe(key: str, dataset_tc: pd.DataFrame, pos_tc: tuple) -> pd.DataFrame | None:
+    """
+    Extrae el valor del Tipo de Cambio (TC) de un DataFrame y lo estructura.
+    
+    Busca el valor del TC en la celda adyacente a donde se encontró el término de búsqueda.
+    """
     if pos_tc == (None, None):
-        return pd.DataFrame()
-    # --- Construye el DataFrame final de EEFF a partir de las posiciones encontradas ---
-    list_of_tc_rows = []
+        return None
+    
     idx_row_tc, idx_col_tc = pos_tc
     date, year, month_name, _ = _extract_metadata_from_filename(key)
-    # Construcción del DataFrame
+    
     df_clean = _clean_df(dataset_tc)
-    tc_value = df_clean.iloc[idx_row_tc, idx_col_tc]  # Valor en columna adyacente
+    tc_value = df_clean.iloc[idx_row_tc, idx_col_tc + 1]  # Valor en columna adyacente
     tc_row = pd.DataFrame({
         'DATE': date, 'PERIODO': year, 'MES': month_name, 'TC': tc_value
     }, index=[0])
-    list_of_tc_rows.append(tc_row)
-    if not list_of_tc_rows:
-        temp_df = pd.DataFrame()
-    else:
-        temp_df = pd.concat(list_of_tc_rows, axis=0, ignore_index=True)
+    temp_df = tc_row
     return temp_df
 
 def process_dataset_tc(files_in_memory: dict, tc_terms: str | list[str],
                        logger: logging.Logger) -> pd.DataFrame:
-    # --- Abrir datasets de EEFF ---
-    logger.info("--- Iniciando sección: Procesamiento de TC ---")
+    """
+    Procesa archivos de 'Banca_Multiple_EEFF' para extraer el Tipo de Cambio (TC).
+    """
+    logger.info("--- 🛠️ Iniciando sección: Procesamiento de TC ---")
     datasets_tc = _convert_excels_in_dict_to_df(
         files_in_memory, name_files='Banca_Multiple_EEFF',
         sheet_open_first=1, logger=logger
         )
     if not datasets_tc:
-        logger.warning("No se encontraron archivos para procesar.")
+        logger.warning("  ⚠️ No se encontraron archivos de 'Banca Múltiple' para procesar TC.")
         return pd.DataFrame()
-    # --- Procesa todos los DataFrames de EEFF y los concatena en uno solo ---
-    list_of_tc_df = []
+    
+    processed_dfs = []
     processed_count = 0
     for key, dataset_tc in datasets_tc.items():
         try:
             pos_tc = _localize_terms(dataset_tc, tc_terms, exact=False)
             df_processed = _build_tc_dataframe(key, dataset_tc, pos_tc)
-            if df_processed is not None:
-                list_of_tc_df.append(df_processed)
+            if df_processed is not None and not df_processed.empty:
+                processed_dfs.append(df_processed)
                 processed_count += 1
+                logger.info(f"  ✔️ Procesado TC de '{key}'")
         except Exception as e:
-            logger.error(f"No se pudo procesar EEFF de '{key}': {e}", exc_info=False)
-    if not list_of_tc_df:
-        logger.warning("No se pudo procesar ningún archivo.")
+            logger.error(f"  ❌ No se pudo procesar TC de '{key}': {e}", exc_info=False)
+            
+    if not processed_dfs:
+        logger.warning("  ⚠️ No se pudo procesar ningún archivo para extraer el TC.")
         return pd.DataFrame()
-    df_eeff = pd.concat(list_of_tc_df, axis=0, ignore_index=True)
+        
+    df_tc = pd.concat(processed_dfs, axis=0, ignore_index=True)
     logger.info(
-        f"Procesamiento completado. Se procesaron {processed_count}/{len(datasets_tc)} archivos. ✅")
-    return df_eeff
-
-if __name__ == "__main__":
-    FINANCIAL_INCOME_TERMS = "INGRESOS FINANCIEROS"
-    SERVICE_INCOME_TERMS = "INGRESOS POR SERVICIOS FINANCIEROS"
-    NET_RESULT_TERMS = [
-        "RESULTADO NETO DEL EJERCICIO",
-        "UTILIDAD ( PÉRDIDA ) NETA",
-        "UTILIDAD (PÉRDIDA) NETA"
-    ]
-    TC_TERMS = "TIPO DE CAMBIO"
-    bucket_name = 'opendataanalyzer_datas'
-    path_file_eeff = 'SBS_EEFF_PROCESSED.csv'
-    path_file_tc = 'SBS_TC_PROCESSED.csv'
-    gcs_manager = utils.GCSManager()
-    sbs_eeff_processed = gcs_manager.download_csv_as_df(bucket_name, path_file_eeff)
-    sbs_tc_processed = gcs_manager.download_csv_as_df(bucket_name, path_file_tc)
-    if sbs_eeff_processed is not None:
-        files_in_memory = download_dataset(sbs_eeff_processed)
-        if bool(files_in_memory):
-            sbs_eeff_actualyzed = process_dataset_eeff(
-                files_in_memory, FINANCIAL_INCOME_TERMS,
-                SERVICE_INCOME_TERMS, NET_RESULT_TERMS,
-                utils.get_logger('SBS')
-                )
-            sbs_eeff_processed = pd.concat(
-                [sbs_eeff_processed, sbs_eeff_actualyzed], 
-                axis=0, ignore_index=True
-                )
-            sbs_tc_processed = process_dataset_tc(
-                files_in_memory, TC_TERMS,
-                utils.get_logger('SBS')
-                )
-        else:
-            pass
-    else:
-        pass
-    
-
+        f"--- ✅ Procesamiento de TC completado. Se procesaron {processed_count}/{len(datasets_tc)} archivos. ---")
+    return df_tc

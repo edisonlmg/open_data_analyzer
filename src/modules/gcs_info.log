@@ -1,3 +1,0 @@
-2025-10-05 13:27:39,322 [INFO] ✅ Conexión exitosa con Google Cloud Storage.
-2025-10-05 13:28:06,535 [INFO] ⬇️ Descargando archivo 'SBS_DATA_ANALYZED.csv' del bucket 'opendataanalyzer_datas'...
-2025-10-05 13:28:08,390 [INFO] ✅ Archivo descargado y cargado en DataFrame exitosamente.

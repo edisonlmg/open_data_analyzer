@@ -16,7 +16,16 @@ if __name__ == "__main__":
 import src.utils as utils
 
 def _expected_dates(start_year: int = 2002, period: str = 'M') -> set[str]:
-    # --- Construye la lista de fechas esperadas en formato 'AAAAMM' ---
+    """
+    Genera un conjunto de fechas esperadas en formato 'AAAAMM'.
+    
+    Args:
+        start_year: Año de inicio para generar las fechas.
+        period: 'M' para mensual, 'Q' para trimestral.
+        
+    Returns:
+        Un conjunto de strings con las fechas en formato 'AAAAMM'.
+    """
     if period not in ['M', 'Q']:
         raise ValueError("El parámetro 'period' debe ser 'M' (mensual) o 'Q' (trimestral).")
     if start_year > datetime.now().year:
@@ -31,7 +40,18 @@ def _expected_dates(start_year: int = 2002, period: str = 'M') -> set[str]:
 
 def _existing_dates(df: pd.DataFrame, doc_type: str, type_col: str = 'TIPO', 
                     date_col: str = 'DATE') -> set[str]:
-    # --- Extrae las fechas existentes en el DataFrame en formato 'AAAAMM' ---
+    """
+    Extrae las fechas existentes de un DataFrame para un tipo de documento específico.
+    
+    Args:
+        df: DataFrame que contiene los datos.
+        doc_type: Tipo de documento a filtrar (ej: 'Banca Multiple EEFF').
+        type_col: Nombre de la columna que contiene el tipo de documento.
+        date_col: Nombre de la columna que contiene la fecha en formato 'AAAAMM'.
+        
+    Returns:
+        Un conjunto de strings con las fechas existentes en formato 'AAAAMM'.
+    """
     df = df[df[type_col] == doc_type]
     df[date_col] = df[date_col].astype(str)
     existing_dates = set(df[date_col])
@@ -39,7 +59,9 @@ def _existing_dates(df: pd.DataFrame, doc_type: str, type_col: str = 'TIPO',
 
 def _missing_dates(df: pd.DataFrame|None, doc_type: str, type_col: str = 'TIPO', date_col: str = 'DATE',
                     period: str = 'M', start_year: int = 2002) -> list[str]:
-    # --- Identifica las fechas faltantes en el dataset ---
+    """
+    Identifica las fechas faltantes comparando las fechas esperadas con las existentes.
+    """
     if df is None or df.empty:
         missing_dates = sorted(list(_expected_dates(start_year, period)))
     else:
@@ -52,7 +74,10 @@ def _missing_dates(df: pd.DataFrame|None, doc_type: str, type_col: str = 'TIPO',
     
 def _tuples_dates(df: pd.DataFrame, doc_type: str, type_col: str = 'TIPO', date_col: str = 'DATE', period: str = 'M', 
                    start_year: int = 2002) -> tuple:
-    # --- Construye la lista de combinaciones de año y mes para formar las url ---
+    """
+    Genera tuplas de (año, (mes_num, mes_largo, mes_corto)) para las fechas faltantes.
+    Estas tuplas son utilizadas para construir las URLs de descarga.
+    """
     months_map = [
         'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
         'Julio', 'Agosto', 'Setiembre', 'Octubre', 'Noviembre', 'Diciembre'
@@ -73,8 +98,10 @@ def _tuples_dates(df: pd.DataFrame, doc_type: str, type_col: str = 'TIPO', date_
 
 def _build_dic_dataset_urls(df: pd.DataFrame, type_col: str = 'TIPO', date_col: str = 'DATE', 
                             start_year: int = 2002) -> dict:
-    # --- Construye las URLs de los datasets faltantes ---
-    # Plantillas para nombres y URLs
+    """
+    Construye un diccionario con las URLs de los datasets faltantes.
+    Itera sobre una plantilla de tipos de reportes y genera las URLs para cada fecha faltante.
+    """
     urls_templates = {
         'Banca_Multiple_EEFF': 'B-2201',
         'Banca_Multiple_Ratios': 'B-2401',
@@ -106,49 +133,34 @@ def _build_dic_dataset_urls(df: pd.DataFrame, type_col: str = 'TIPO', date_col: 
 def download_dataset(df: pd.DataFrame | None, type_col: str = 'TIPO', date_col: str = 'DATE', 
                      start_year: int = 2002) -> dict[str, BytesIO]:
     """
-    Descarga datasets y los mantiene en memoria (BytesIO) sin guardarlos localmente.
+    Descarga los datasets faltantes y los almacena en memoria como objetos BytesIO.
     
     Returns:
-        Tuple con:
-        - bool: Si hubo descargas
-        - Dict[str, BytesIO]: Diccionario con nombre_archivo -> contenido en memoria
+        Un diccionario donde las claves son los nombres de los archivos y los valores
+        son los contenidos de los archivos en objetos BytesIO.
     """
-    logger = utils.get_logger('SBS')
-    logger.info(">>> Realizando el proceso de descarga de datasets en memoria...")
+    logger = utils.get_logger('sbs')
+    logger.info(">>> 📥 Iniciando descarga de datasets en memoria...")
     build_dic_dataset_urls = _build_dic_dataset_urls(df, type_col, date_col, start_year)
-    # Diccionario para almacenar archivos en memoria
+    
     files_in_memory = {}
     for file_name, url in build_dic_dataset_urls.items():
         try:
             response = requests.get(url)
             if response.status_code == 200:
-                # Crear objeto BytesIO en memoria
                 file_memory = BytesIO(response.content)
                 files_in_memory[file_name] = file_memory
-                logger.info(f"Archivo cargado en memoria: {file_name}.xls desde {url}")
+                logger.info(f"  ✔️ Archivo '{file_name}.xls' cargado en memoria.")
             else:
-                logger.warning(f"Archivo {file_name} no encontrado en la URL: {url} (Status code: {response.status_code})")
+                logger.warning(f"  ⚠️ Archivo '{file_name}' no encontrado en {url} (Código: {response.status_code})")
         except requests.RequestException as e:
-            logger.error(f"Error al descargar el archivo desde {url}: {e}")
+            logger.error(f"  ❌ Error de red al descargar desde {url}: {e}")
     
     if bool(files_in_memory):
-        logger.info(f"Descarga finalizada. Se cargaron {len(files_in_memory)} archivos en memoria.")
+        logger.info(f"Se cargaron {len(files_in_memory)} archivos nuevos en memoria.")
     else:
         logger.info("No se encontraron archivos para descargar.")
     
-    logger.info(f"<<< Proceso de descarga finalizado. Hubo descargas en memoria?: {bool(files_in_memory)}.")
+    logger.info(f"<<< 🏁 Proceso de descarga finalizado. ¿Hubo descargas?: {'Sí' if files_in_memory else 'No'}.")
     return files_in_memory
 
-if __name__ == "__main__":
-    bucket_name = 'opendataanalyzer_datas'
-    path_file = 'SBS_EEFF_PROCESSED.csv'
-    gcs_manager = utils.GCSManager()
-    sbs_eeff_analyzed = gcs_manager.download_csv_as_df(bucket_name, path_file)
-    if sbs_eeff_analyzed is not None:
-        was_downloaded, files_in_memory = download_dataset(sbs_eeff_analyzed)
-        if was_downloaded:
-            print(f"Se cargaron {len(files_in_memory)} archivos en memoria.")
-        else:
-            print("No se encontraron archivos para descargar.")
-    else:
-        print(f"Error: No se pudo cargar el archivo {path_file} desde GCS.")
