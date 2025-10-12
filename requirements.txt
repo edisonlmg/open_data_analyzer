@@ -79,7 +79,7 @@ prompt_toolkit==3.0.50
 proto-plus==1.26.1
 protobuf==6.30.2
 psutil==7.0.0
-psycopg2==2.9.10
+psycopg2-binary==2.9.10
 pure_eval==0.2.3
 pyarrow==19.0.0
 pyasn1==0.6.1
@@ -91,8 +91,6 @@ python-dateutil==2.9.0.post0
 python-dotenv==1.0.1
 python-json-logger==3.2.1
 pytz==2025.1
-pywin32==308
-pywinpty==2.0.15
 PyYAML==6.0.2
 pyzmq==26.2.1
 referencing==0.36.2
@@ -123,3 +121,6 @@ webcolors==24.11.1
 webencodings==0.5.1
 websocket-client==1.8.0
 xlrd==2.0.1
+# Dependencias específicas de Windows (solo se instalan en Windows)
+pywin32==308; platform_system=="Windows"
+pywinpty==2.0.15; platform_system=="Windows"

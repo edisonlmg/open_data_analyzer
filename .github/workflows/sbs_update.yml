@@ -36,8 +36,7 @@ jobs:
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
-        # Instalar dependencias ignorando pywin32 en Linux
-        pip install -r requirements.txt || pip install $(grep -v "pywin32" requirements.txt)
+        pip install -r requirements.txt
     
     - name: Set up GCS credentials
       run: |
