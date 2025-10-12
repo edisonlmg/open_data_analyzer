@@ -1,4 +1,4 @@
-# /path/to/your/project/gcs_manager.py
+# src/modules/gcs_manager.py
 import os
 import io
 import sys
@@ -18,7 +18,11 @@ class GCSManager:
     
     Esta clase utiliza las credenciales de la cuenta de servicio de Google Cloud
     especificadas en la variable de entorno `GOOGLE_APPLICATION_CREDENTIALS`.
-    Asegúrate de tener un archivo .env configurado para cargar esta variable.
+    
+    Funciona en dos modos:
+    - Local: Carga credenciales desde archivo .env
+    - GitHub Actions: Usa la variable de entorno GOOGLE_APPLICATION_CREDENTIALS
+      configurada por el workflow
     """
     def __init__(self):
         """
@@ -26,8 +30,20 @@ class GCSManager:
         """
         self.logger = get_logger('sbs')
         try:
-            # Carga las variables de entorno desde el archivo .env
-            load_dotenv()
+            # Solo cargar .env si existe (ejecución local)
+            # En GitHub Actions, la variable ya está configurada por el workflow
+            env_file = Path('.env')
+            if env_file.exists():
+                self.logger.info("🔧 Ejecutando en modo local. Cargando credenciales desde .env")
+                load_dotenv()
+            else:
+                self.logger.info("☁️ Ejecutando en modo remoto (GitHub Actions). Usando credenciales del entorno")
+            
+            # Verificar que las credenciales estén configuradas
+            credentials_path = os.getenv('GOOGLE_APPLICATION_CREDENTIALS')
+            if not credentials_path:
+                raise ValueError("GOOGLE_APPLICATION_CREDENTIALS no está configurado")
+            
             self.client = storage.Client()
             self.logger.info("✅ Conexión exitosa con Google Cloud Storage.")
         except Exception as e:
