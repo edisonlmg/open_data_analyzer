@@ -60,12 +60,16 @@ def process_and_upload_tc(files_in_memory: dict, sbs_tc_processed: pd.DataFrame 
     """Procesa, concatena y sube los datos de Tipo de Cambio."""
     TC_TERMS = "TIPO DE CAMBIO"
     sbs_tc_actualyzed = process_dataset_tc(files_in_memory, TC_TERMS, logger)
-
-    if not sbs_tc_actualyzed.empty and sbs_tc_processed is not None:
-        sbs_tc_processed = pd.concat(
-            [sbs_tc_processed, sbs_tc_actualyzed],
-            axis=0, ignore_index=True
-        )
+    
+    if not sbs_tc_actualyzed.empty:
+        if sbs_tc_processed is not None and not sbs_tc_processed.empty:
+            sbs_tc_processed = pd.concat(
+                [sbs_tc_processed, sbs_tc_actualyzed],
+                axis=0, ignore_index=True
+            )
+        else:
+            sbs_tc_processed = sbs_tc_actualyzed
+            
         logger.info(f"💾 Guardando dataset de TC procesado en '{path_file_tc}'...")
         gcs_manager.upload_df_as_csv(sbs_tc_processed, bucket_name, path_file_tc)
 
@@ -90,6 +94,11 @@ def main():
     if sbs_eeff_processed is None or sbs_eeff_processed.empty:
         logger.warning(f"⚠️ No se encontró el archivo base '{path_file_eeff}' o está vacío. Se intentará descargar todos los datos históricos.")
         sbs_eeff_processed = pd.DataFrame() # Se crea un DF vacío para que el flujo continúe
+
+    # Si el archivo de TC no existe, se asume que es la primera ejecución.
+    if sbs_tc_processed is None:
+        logger.warning(f"⚠️ No se encontró el archivo base '{path_file_tc}'. Se creará uno nuevo si se encuentran datos de TC.")
+        sbs_tc_processed = pd.DataFrame() # Se crea un DF vacío para que el flujo continúe
 
     # --- 3. Detección y Descarga de Nuevos Archivos ---
     files_in_memory = download_dataset(df=sbs_eeff_processed)
