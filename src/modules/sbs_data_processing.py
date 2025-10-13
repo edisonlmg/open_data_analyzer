@@ -207,6 +207,11 @@ def _transform_eeff_dataframe(key: str, dataset_eeff: pd.DataFrame) -> pd.DataFr
                 df["ENTIDAD"]
                 .astype(str)
                 .str.replace(r"[\d*/()]", "", regex=True)
+                .str.replace(
+                    r"[\u00B2\u00B3\u00B9\u2070-\u2079\u207A-\u207F\u1D2C-\u1D7F]", 
+                    "", 
+                    regex=True
+                    )
                 .str.strip()
                 .str.replace(r'\s+', ' ', regex=True)
             ),

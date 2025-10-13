@@ -110,7 +110,7 @@ class GCSManager:
             self.logger.info(f"⬆️ Subiendo DataFrame a '{destination_blob_name}' en el bucket '{bucket_name}'...")
 
             # Convertir DataFrame a CSV en formato string, sin incluir el índice
-            csv_data = df.to_csv(index=False, encoding='utf-8-sig')
+            csv_data = df.to_csv(index=False, encoding='utf-8-sig') # utf-8-sig agrega el BOM para compatibilidad con Excel
             
             # Subir el string como un archivo
             blob.upload_from_string(csv_data, content_type='text/csv')
