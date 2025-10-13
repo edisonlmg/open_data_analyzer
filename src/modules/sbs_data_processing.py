@@ -272,7 +272,7 @@ def _build_tc_dataframe(key: str, dataset_tc: pd.DataFrame, pos_tc: tuple) -> pd
     date, year, month_name, _ = _extract_metadata_from_filename(key)
     
     df_clean = _clean_df(dataset_tc)
-    tc_value = df_clean.iloc[idx_row_tc, idx_col_tc + 1]  # Valor en columna adyacente
+    tc_value = df_clean.iloc[idx_row_tc, idx_col_tc]  # Valor en columna adyacente
     tc_row = pd.DataFrame({
         'DATE': date, 'PERIODO': year, 'MES': month_name, 'TC': tc_value
     }, index=[0])
