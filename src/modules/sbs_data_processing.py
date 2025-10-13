@@ -203,7 +203,7 @@ def _transform_eeff_dataframe(key: str, dataset_eeff: pd.DataFrame) -> pd.DataFr
                     df['ENTIDAD'].str.lower().str.startswith('total') 
                     | df['ENTIDAD'].str.lower().str.contains('sucursal'))])
         .assign(
-            ENTIDAD=lambda df: df: (
+            ENTIDAD=lambda df: (
                 df["ENTIDAD"]
                 .astype(str)
                 .str.replace(r"[\d*/()]", "", regex=True)
