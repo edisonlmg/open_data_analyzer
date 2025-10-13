@@ -1,6 +1,5 @@
 # src/modules/sbs_data_fetcher.py
 
-import os
 import sys
 import requests
 import pandas as pd

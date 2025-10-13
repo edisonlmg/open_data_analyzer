@@ -1,12 +1,8 @@
 # src/modules/gcs_manager.py
 import os
 import io
-import sys
 from pathlib import Path
 import pandas as pd
-if __name__ == "__main__":
-    project_root = Path(__file__).parent.parent.parent
-    sys.path.insert(0, str(project_root))
 from google.cloud import storage
 from google.cloud.exceptions import NotFound
 from dotenv import load_dotenv

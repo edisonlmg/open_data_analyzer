@@ -1,19 +1,8 @@
 # src/modules/data_processing.py
 
-import os
-import sys
 import pandas as pd
-import numpy as np
 import logging
 import io
-from pathlib import Path
-
-if __name__ == "__main__":
-    project_root = Path(__file__).parent.parent.parent
-    sys.path.insert(0, str(project_root))
-
-import src.utils as utils
-from src.modules.sbs_data_fetcher import download_dataset
 
 def _open_excel_in_memory_as_df(file_in_memory: io.BytesIO,
                                 sheet_open_first: int = 2) -> pd.DataFrame:
