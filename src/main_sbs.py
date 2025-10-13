@@ -86,9 +86,10 @@ def main():
         gcs_manager, bucket_name, path_file_eeff, path_file_tc, logger
     )
 
-    if sbs_eeff_processed is None:
-        logger.error(f"❌ No se pudo descargar el archivo base '{path_file_eeff}'. Abortando proceso.")
-        return
+    # Si el archivo base no existe, se asume que es la primera ejecución.
+    if sbs_eeff_processed is None or sbs_eeff_processed.empty:
+        logger.warning(f"⚠️ No se encontró el archivo base '{path_file_eeff}' o está vacío. Se intentará descargar todos los datos históricos.")
+        sbs_eeff_processed = pd.DataFrame() # Se crea un DF vacío para que el flujo continúe
 
     # --- 3. Detección y Descarga de Nuevos Archivos ---
     files_in_memory = download_dataset(df=sbs_eeff_processed)

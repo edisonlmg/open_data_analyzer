@@ -61,11 +61,12 @@ def _missing_dates(df: pd.DataFrame|None, doc_type: str, type_col: str = 'TIPO',
                     period: str = 'M', start_year: int = 2002) -> list[str]:
     """
     Identifica las fechas faltantes comparando las fechas esperadas con las existentes.
+    Si el DataFrame es None o está vacío, devuelve todas las fechas esperadas.
     """
+    expected_dates = _expected_dates(start_year, period)
     if df is None or df.empty:
-        missing_dates = sorted(list(_expected_dates(start_year, period)))
+        missing_dates = sorted(list(expected_dates))
     else:
-        expected_dates = _expected_dates(start_year, period)
         existing_dates = _existing_dates(df, doc_type, type_col, date_col)
         if not existing_dates.issubset(expected_dates):
             raise ValueError("El DataFrame contiene fechas fuera del rango esperado.")
@@ -163,4 +164,3 @@ def download_dataset(df: pd.DataFrame | None, type_col: str = 'TIPO', date_col: 
     
     logger.info(f"<<< 🏁 Proceso de descarga finalizado. ¿Hubo descargas?: {'Sí' if files_in_memory else 'No'}.")
     return files_in_memory
-
