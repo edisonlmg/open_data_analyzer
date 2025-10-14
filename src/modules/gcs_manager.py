@@ -20,11 +20,11 @@ class GCSManager:
     - GitHub Actions: Usa la variable de entorno GOOGLE_APPLICATION_CREDENTIALS
       configurada por el workflow
     """
-    def __init__(self):
+    def __init__(self, logger_name: str = 'gcs_manager'):
         """
         Inicializa el cliente de Google Cloud Storage.
         """
-        self.logger = get_logger('sbs')
+        self.logger = get_logger(logger_name)
         try:
             # Solo cargar .env si existe (ejecución local)
             # En GitHub Actions, la variable ya está configurada por el workflow

@@ -12,6 +12,7 @@ def _align_columns_names(inv_datasets: dict[str, pd.DataFrame]) -> dict[str, pd.
             df.rename(
                 {
                     'NOMBRE_OPMI': 'NOM_OPMI',
+                    'OPI': 'NOM_OPMI',
                     'NOMBRE_UF': 'NOM_UF',
                     'NOMBRE_UEI': 'NOM_UEI',
                     'NOMBRE_UEP': 'NOM_UEP',

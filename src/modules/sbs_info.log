@@ -1,6 +1,0 @@
-2025-10-13 08:53:09,804 [INFO] ☁️ Ejecutando en modo remoto (GitHub Actions). Usando credenciales del entorno
-2025-10-13 08:53:09,817 [INFO] ✅ Conexión exitosa con Google Cloud Storage.
-2025-10-13 08:53:40,585 [INFO] ⬇️ Descargando archivo 'SBS_EEFF_PROCESSED.csv' del bucket 'opendataanalyzer_datas'...
-2025-10-13 08:53:43,119 [INFO] ✅ Archivo descargado y cargado en DataFrame exitosamente.
-2025-10-13 08:53:52,846 [INFO] ⬇️ Descargando archivo 'SBS_TC_PROCESSED.csv' del bucket 'opendataanalyzer_datas'...
-2025-10-13 08:53:53,161 [INFO] ✅ Archivo descargado y cargado en DataFrame exitosamente.
