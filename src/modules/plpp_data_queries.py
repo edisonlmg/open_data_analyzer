@@ -28,6 +28,44 @@ def _transform_values(df_plpp: pd.DataFrame) -> pd.DataFrame:
     )
     return df_transformed
 
+def _replace_values(df: pd.DataFrame) -> pd.DataFrame:
+    df_replaced = (
+        df
+        .replace(
+            {
+                'NIVEL_ENUMERATE': {
+                    'GOBIERNO NACIONAL':'GN',
+                    'GOBIERNOS REGIONALES':'GR',
+                    'GOBIERNOS LOCALES':'GL'
+                    },
+                'FUENTE_FINANCIAMIENTO_ENUMERATE': {
+                    'RECURSOS ORDINARIOS':'RO',
+                    'RECURSOS DIRECTAMENTE RECAUDADOS':'RDR',
+                    'RECURSOS POR OPERACIONES OFICIALES DE CREDITO':'ROOC',
+                    'DONACIONES Y TRANSFERENCIAS':'DT', 
+                    'RECURSOS DETERMINADOS':'RD'
+                    },
+                'CATEGORIA_GASTO_ENUMERATE': {
+                    'GASTOS CORRIENTES':'CORRIENTE',
+                    'GASTOS DE CAPITAL':'CAPITAL',
+                    'SERVICIO DE LA DEUDA':'DEUDA'
+                    },
+                'GENERICA_ENUMERATE': {
+                    'BIENES Y SERVICIOS':'BsSs',
+                    'DONACIONES Y TRANSFERENCIAS':'DT',
+                    'PENSIONES Y OTRAS PRESTACIONES SOCIALES':'PENSIONES',
+                    'PERSONAL Y OBLIGACIONES SOCIALES':'PERSONAL', 
+                    'OTROS GASTOS':'OTROS',
+                    'ADQUISICION DE ACTIVOS NO FINANCIEROS':'AANF',
+                    'ADQUISICION DE ACTIVOS FINANCIEROS':'AAF', 
+                    'RESERVA DE CONTINGENCIA':'RESERVA',
+                    'SERVICIO DE LA DEUDA PUBLICA':'DEUDA'
+                    }
+            }
+            )
+    )
+    return df_replaced
+
 def _query_categoria(df: pd.DataFrame) -> pd.DataFrame:
     """
     Consulta para obtener el total del presupuesto asignado por año.
@@ -35,6 +73,7 @@ def _query_categoria(df: pd.DataFrame) -> pd.DataFrame:
     df_grouped = (
         df
         .pipe(_transform_values)
+        .pipe(_replace_values)
         .groupby(
             [
                 'ANO_EJE',
@@ -68,6 +107,7 @@ def _query_funcion(df: pd.DataFrame) -> pd.DataFrame:
     df_grouped = (
         df.loc[df['ANO_EJE']>df['ANO_EJE'].max()-2]
         .pipe(_transform_values)
+        .pipe(_replace_values)
         .groupby(
             [
                 'ANO_EJE',
