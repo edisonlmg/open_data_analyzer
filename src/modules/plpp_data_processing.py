@@ -6,44 +6,32 @@ import numpy as np
 
 def _departamento_transform(df: pd.DataFrame) -> pd.DataFrame:
     """
-    Transforma DEPARTAMENTO_NOMBRE solo cuando NIVEL_GOBIERNO != 1.
-    Para NIVEL_GOBIERNO == 1, asigna 'NO APLICA' si el campo está vacío.
+    Transforma DEPARTAMENTO_NOMBRE según NIVEL_GOBIERNO.
+    - != 1: usa DEPARTAMENTO_NOMBRE o PLIEGO_NOMBRE limpio
+    - == 1: mantiene valor o asigna 'NO APLICA'
     """
     if "NIVEL_GOBIERNO" not in df.columns:
         return df
-
-    # Máscara: aplica transformación solo cuando NIVEL_GOBIERNO != 1
-    mask = df["NIVEL_GOBIERNO"] != 1
-
-    if mask.any():
-        sub_df = df.loc[mask].copy()
-
-        provincia = sub_df.get("PROVINCIA_NOMBRE", pd.Series(index=sub_df.index))
-        pliego = sub_df.get("PLIEGO_NOMBRE", pd.Series(index=sub_df.index))
-
-        sub_df["DEPARTAMENTO_NOMBRE"] = (
-            provincia.combine_first(
-                pliego.replace(
-                    {
-                        r"(?i)^GOBIERNO REGIONAL DEL DEPARTAMENTO DE\s*": "",
-                        r"(?i)^GOBIERNO REGIONAL DE LA\s*": ""
-                    },
-                    regex=True
-                )
-            )
-            .fillna("NO APLICA")
-        )
-
-        df.loc[mask, "DEPARTAMENTO_NOMBRE"] = sub_df["DEPARTAMENTO_NOMBRE"]
-
-    # Para NIVEL_GOBIERNO == 1: no modificar, solo completar si falta
-    mask_gob_central = df["NIVEL_GOBIERNO"] == 1
-    if mask_gob_central.any():
-        df.loc[mask_gob_central, "DEPARTAMENTO_NOMBRE"] = (
-            df.loc[mask_gob_central, "DEPARTAMENTO_NOMBRE"]
-            .where(df.loc[mask_gob_central, "DEPARTAMENTO_NOMBRE"].notna(), "NO APLICA")
-        )
-
+    
+    # Crear una copia de la columna de pliego y limpiarla
+    pliego_limpio = df["PLIEGO_NOMBRE"].replace(
+        {r"(?i)^GOBIERNO REGIONAL (DEL DEPARTAMENTO DE|DE LA)\s*": ""},
+        regex=True
+    )
+    
+    # Regional/Local: usar DEPARTAMENTO_NOMBRE si existe, si no, usar pliego limpio
+    mask_regional = df["NIVEL_GOBIERNO"] != 1
+    df.loc[mask_regional, "DEPARTAMENTO_EJECUTORA_NOMBRE"] = (
+        df.loc[mask_regional, "DEPARTAMENTO_EJECUTORA_NOMBRE"]
+        .combine_first(pliego_limpio[mask_regional]).fillna("NO APLICA")
+    )
+    
+    # Gobierno Central: completar vacíos
+    mask_central = df["NIVEL_GOBIERNO"] == 1
+    df.loc[mask_central, "DEPARTAMENTO_EJECUTORA_NOMBRE"] = (
+        df.loc[mask_central, "DEPARTAMENTO_EJECUTORA_NOMBRE"].fillna("NO APLICA")
+    )
+    
     return df
 
 
@@ -55,26 +43,23 @@ def _clean_dataframe(df: pd.DataFrame, rename_map: dict, drop_cols: list[str]) -
     - Limpia cadenas y reemplaza vacíos por NaN
     - Rellena valores faltantes en campos clave
     """
-    df = (
-        df.rename(columns=rename_map)
-          .drop(columns=drop_cols, errors="ignore")
-          .replace(r"^\s*$", np.nan, regex=True)
+    df_clean = (
+        df
+        .rename(columns=rename_map)
+        .drop(columns=drop_cols, errors="ignore")
+        .replace(r"^\s*$", np.nan, regex=True)
     )
 
-    # Limpiar texto solo en columnas de tipo object
-    for col in df.select_dtypes(include="object").columns:
-        df[col] = df[col].astype(str).str.strip()
+    # Aplicar la transformación condicional de DEPARTAMENTO_NOMBRE
+    df_clean = _departamento_transform(df_clean)
 
     # Completar campos de sector
-    if "SECTOR" in df.columns:
-        df["SECTOR"] = df["SECTOR"].fillna(98).astype("int64")
-    if "SECTOR_NOMBRE" in df.columns:
-        df["SECTOR_NOMBRE"] = df["SECTOR_NOMBRE"].fillna("GOBIERNOS LOCALES")
+    if "SECTOR" in df_clean.columns:
+        df_clean["SECTOR"] = df_clean["SECTOR"].fillna(98).astype("int64")
+    if "SECTOR_NOMBRE" in df_clean.columns:
+        df_clean["SECTOR_NOMBRE"] = df_clean["SECTOR_NOMBRE"].fillna("GOBIERNOS LOCALES")
 
-    # Aplicar la transformación condicional de DEPARTAMENTO_NOMBRE
-    df = _departamento_transform(df)
-
-    return df
+    return df_clean
 
 
 def _process_dict_of_dataframes(dic_df: dict[str, pd.DataFrame], rename_map: dict, drop_cols: list[str]) -> dict[str, pd.DataFrame]:
@@ -119,5 +104,3 @@ def process_dataset_plpp(dic_df_plp: dict[str, pd.DataFrame]) -> pd.DataFrame:
     merged_df = _merge_dataframes(cleaned_dict)
 
     return merged_df
-
-
